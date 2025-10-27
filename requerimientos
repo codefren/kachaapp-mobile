@@ -1,0 +1,35 @@
+eliminar productos  desde la lista de consolidados, 
+
+en la lista de consolidados agregar un referencia de stock
+
+agregar boton para agregar codigo de barra fallisdo
+
+agregar busqueda indexada 
+
+agregar un formulario para registrar productos que no estan en la lista
+
+agregar la cantidad de productos por paquete
+
+cuando se escanea un producto debe aparecer de una vez el formulario que 
+rellena el producto con una rueda de cantidades y que a la vez multiplique 
+la cantidad de unidades que trae la caja por las cantidades solicitadas
+
+
+agregar busqueda indexada por codigo de barra 
+
+se saltan muchos productos por que no se pueden escanear
+
+cuando agregas un producto a consolidado debes mostrar de manes que los ultimos guardados se vean de primero
+
+agregar formulario para registrar productos que no estan en la lista
+
+cuando se escanea por un producto deberia mostrar toda la familia del producto en lista 
+
+
+cuando se toca la pantalla debe desaparecer el teclad
+
+
+agregar un boton flotante para agregar mas productos y guardar lo que hay
+
+cuando se queda un rato en la misma pagina vuelve al principio deberia de permanecer en el mismo lugar
+
