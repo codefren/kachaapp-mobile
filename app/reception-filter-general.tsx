@@ -28,7 +28,7 @@ interface ProviderItem {
 
 interface ApiResponse<T> {
   success: boolean;
-  data?: T; // La propiedad 'data' puede ser undefined si 'success' es false o si no hay resultados
+  data?: T;
   statusCode: number;
 }
 
@@ -106,11 +106,10 @@ export default function ReceptionHistoricalGeneral() {
   const handleSearchByDate = () => {
     setInvoices([]);
     setFilterDate("");
-    // Implementa aquí la lógica para buscar los datos históricos
+
     const dateToSearch = date.toLocaleDateString("en-CA"); // Ejemplo de formato yyyy-mm-dd
     console.log(`[Busqueda] Iniciando búsqueda para la fecha: ${dateToSearch}`);
-    // fetchProviders(dateToSearch);
-    // Por ahora, solo simulamos la acción:
+
     alert(`Buscando facturas recibidas para la fecha: ${dateToSearch}`);
     setFilterDate(dateToSearch);
     fetchFilterInvoices();
@@ -343,7 +342,7 @@ export default function ReceptionHistoricalGeneral() {
           )}
         </View>
 
-        {/* 2. SECCIÓN DE RESULTADOS DE FACTURAS */}
+        {/* 2. RESULTADOS DE FACTURAS */}
         <View style={styles.resultsContainer}>
           <Text style={styles.sectionHeader}>Facturas Recibidas</Text>
 
@@ -360,7 +359,6 @@ export default function ReceptionHistoricalGeneral() {
 
           {/* Renderizado de Facturas en Cuadrícula (Grid) */}
           {invoices.length > 0 && (
-            // NOTA: No necesitamos un ScrollView interno aquí, ya que el contenedor principal ya lo tiene.
             <View style={styles.invoiceList}>
               {invoices.map((invoice) => (
                 <View key={invoice.id} style={styles.invoiceCard}>
@@ -399,9 +397,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
   scrollContent: {
-    // Necesario para que el ScrollView se estire si el contenido es menor que la pantalla
     flexGrow: 1,
-    paddingBottom: 20, // Espacio al final del contenido desplazable
+    paddingBottom: 20,
   },
   headerText: {
     fontSize: 22,
@@ -447,7 +444,7 @@ const styles = StyleSheet.create({
   },
   invoiceImage: {
     width: "100%",
-    height: screenWidth * 0.45, // Altura ajustada para que se vea bien en la mitad de la pantalla
+    height: screenWidth * 0.45,
     borderRadius: 6,
     backgroundColor: "#D1D5DB",
     borderWidth: 1,
@@ -478,9 +475,9 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
   },
   invoiceCard: {
-    width: "50%", // Cada tarjeta ocupa exactamente la mitad del ancho del contenedor
-    paddingHorizontal: 8, // Espacio horizontal entre las tarjetas
-    marginBottom: 16, // Espacio vertical entre las filas
+    width: "50%",
+    paddingHorizontal: 8,
+    marginBottom: 16,
   },
   orderIdText: {
     color: "#374151",
@@ -570,9 +567,9 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   invoiceList: {
-    flexDirection: "row", // Organizar elementos en una fila
-    flexWrap: "wrap", // Permitir que los elementos salten a la siguiente fila
-    marginHorizontal: -8, // Contrarrestar el margen lateral de las tarjetas
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -8,
   },
   statusDot: {
     width: 8,
