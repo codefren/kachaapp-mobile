@@ -1,7 +1,9 @@
 {
-  "name": "kch-digital-frontend",
+  "name": "kachasystem",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "author": "Kachadigital S.L",
+  "homepage": "https://kachadigital.com/",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
