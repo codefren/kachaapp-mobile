@@ -52,6 +52,7 @@ export default function ProductsScreen() {
   const token = contextToken || middlewareToken;
 
   const [data, setData] = useState<Product[] | null>(null);
+  const [allProducts, setAllProducts] = useState<Product[] | null>(null); // Todos los productos sin filtrar
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -441,6 +442,7 @@ export default function ProductsScreen() {
       
       // Guardar datos completos y mapa de índices
       setData(allProducts);
+      setAllProducts(allProducts); // Guardar copia para búsquedas
       setLetterIndexMap(letterIndex);
       setAvailableLetters(Array.from(letterIndex.keys()).sort());
       
@@ -539,29 +541,63 @@ export default function ProductsScreen() {
       }
     } else {
       console.log('❌ No se cumplen condiciones para cargar más');
-      console.log('✅ === loadMoreProducts FINALIZADO (sin acción) ===\n');
+      console.log('✅ === loadMoreProductsFINALIZADO (sin acción) ===\n');
     }
   }, [hasNextPage, loadingMore, loading, isAlphabeticalMode, fetchProducts, getNextLetter]);
 
-  // Función para búsqueda de productos
-  const searchProducts = useCallback(async (query: string) => {
-    if (isSearching) return;
+  // Función para búsqueda de productos (client-side)
+  const searchProducts = useCallback((query: string) => {
+    console.log('\n🔍 === BÚSQUEDA LOCAL ===');
+    console.log('Query:', query);
+    
+    if (!allProducts) {
+      console.log('❌ No hay productos cargados aún');
+      return;
+    }
     
     setIsSearching(true);
-    setNextUrl(null);
-    setCurrentLetter(null);
-    setIsAlphabeticalMode(false); // Desactivar modo alfabético al buscar
-    setLoadedLetters([]);
     
-    try {
-      await fetchProducts(false, false, query);
-    } finally {
+    const normalizedQuery = query.toLowerCase().trim();
+    
+    if (!normalizedQuery) {
+      console.log('⚠️ Query vacío, mostrando todos los productos');
+      setData(allProducts);
       setIsSearching(false);
+      return;
     }
-  }, [fetchProducts, isSearching]);
+    
+    // Filtrar productos localmente
+    const filtered = allProducts.filter(product => 
+      product.name.toLowerCase().includes(normalizedQuery) ||
+      product.sku?.toLowerCase().includes(normalizedQuery) ||
+      product.barcodes.some(barcode => 
+        barcode.code.toLowerCase().includes(normalizedQuery)
+      )
+    );
+    
+    console.log(`✅ Encontrados ${filtered.length} productos de ${allProducts.length}`);
+    setData(filtered);
+    setCurrentLetter(null);
+    setIsSearching(false);
+    
+    // Hacer scroll al primer resultado
+    if (filtered.length > 0 && flatListRef.current) {
+      setTimeout(() => {
+        if (flatListRef.current) {
+          console.log('📍 Haciendo scroll al primer resultado');
+          flatListRef.current.scrollToOffset({
+            offset: 0,
+            animated: true,
+          });
+        }
+      }, 100);
+    }
+  }, [allProducts, flatListRef]);
 
   // Función para limpiar búsqueda y volver a la lista original
-  const clearSearch = useCallback(() => {
+  const handleClearSearch = useCallback(() => {
+    console.log('\n🧽 === LIMPIANDO BÚSQUEDA ===');
+    
     // Limpiar timeout si existe
     if (searchTimeout) {
       clearTimeout(searchTimeout);
@@ -569,10 +605,33 @@ export default function ProductsScreen() {
     }
     
     setSearchQuery('');
-    setNextUrl(null);
     setIsSearching(false);
-    fetchProducts(true); // Refresh para obtener página 1 de la lista original
-  }, [fetchProducts, searchTimeout]);
+    
+    // Restaurar todos los productos
+    if (allProducts) {
+      console.log('✅ Restaurando', allProducts.length, 'productos');
+      setData(allProducts);
+      
+      // Detectar primera letra
+      if (allProducts.length > 0) {
+        const firstLetter = allProducts[0].name.charAt(0).toUpperCase();
+        setCurrentLetter(firstLetter);
+      }
+      
+      // Scroll al inicio
+      if (flatListRef.current) {
+        setTimeout(() => {
+          if (flatListRef.current) {
+            console.log('📍 Scroll al inicio de la lista');
+            flatListRef.current.scrollToOffset({
+              offset: 0,
+              animated: true,
+            });
+          }
+        }, 100);
+      }
+    }
+  }, [searchTimeout, allProducts, flatListRef]);
 
   // Función para manejar presión de letra en el índice alfabético
   const handleLetterPress = useCallback((letter: string) => {
@@ -638,11 +697,28 @@ export default function ProductsScreen() {
       clearTimeout(searchTimeout);
     }
     
-    // Si el texto está vacío, limpiar búsqueda inmediatamente
+    // Si el texto está vacío, restaurar todos los productos
     if (text.trim() === '') {
-      setNextUrl(null);
       setIsSearching(false);
-      fetchProducts(true); // Volver a página 1 de lista original
+      if (allProducts) {
+        setData(allProducts);
+        if (allProducts.length > 0) {
+          const firstLetter = allProducts[0].name.charAt(0).toUpperCase();
+          setCurrentLetter(firstLetter);
+        }
+        
+        // Scroll al inicio
+        if (flatListRef.current) {
+          setTimeout(() => {
+            if (flatListRef.current) {
+              flatListRef.current.scrollToOffset({
+                offset: 0,
+                animated: true,
+              });
+            }
+          }, 100);
+        }
+      }
       return;
     }
     
@@ -652,7 +728,7 @@ export default function ProductsScreen() {
     }, 500) as any; // 500ms de delay
     
     setSearchTimeout(newTimeout);
-  }, [searchTimeout, searchProducts, fetchProducts]);
+  }, [searchTimeout, searchProducts, allProducts, flatListRef]);
 
   useFocusEffect(
     useCallback(() => {
@@ -880,68 +956,73 @@ export default function ProductsScreen() {
     
     setScannedData(data);
     console.log('[Products] 📷 Código EAN-13 escaneado:', data);
+    console.log('🔍 Buscando en lista pre-cargada...');
     
-    // Buscar producto por código de barras
+    // Buscar producto en la lista pre-cargada
     try {
       setScannerLoading(true);
-      const url = `/api/products/?provider=${providerId}&barcode=${encodeURIComponent(data)}`;
-      const response = await apiMiddleware.get(url, true);
       
-      if (response.success && response.data) {
-        const productsData = response.data as ProductsResponse;
+      if (!allProducts || allProducts.length === 0) {
+        console.log('⚠️ No hay productos pre-cargados aún');
+        setError('Esperando a que se carguen los productos...');
+        setScannerLoading(false);
+        return;
+      }
+      
+      // Buscar producto por código de barras en la lista local
+      const foundProduct = allProducts.find(product => 
+        product.barcodes.some(barcode => barcode.code === data)
+      );
+      
+      if (foundProduct) {
+        console.log('✅ Producto encontrado en lista local:', foundProduct.name);
         
-        if (productsData.results.length > 0) {
-          // Producto encontrado
-          const foundProduct = productsData.results[0];
-          
-          // Cerrar cámara primero
-          closeCamera();
-          
-          // Limpiar búsqueda si existe para mostrar lista completa
-          if (searchQuery.trim()) {
-            setSearchQuery('');
-            if (searchTimeout) {
-              clearTimeout(searchTimeout);
-              setSearchTimeout(null);
-            }
+        // Cerrar cámara primero
+        closeCamera();
+        
+        // Limpiar búsqueda si existe para mostrar lista completa
+        if (searchQuery.trim()) {
+          setSearchQuery('');
+          if (searchTimeout) {
+            clearTimeout(searchTimeout);
+            setSearchTimeout(null);
           }
-          
-          // Si ya hay productos, agregar el nuevo a la lista existente
-          setData(prevData => {
-            if (prevData && prevData.length > 0) {
-              // Verificar si el producto ya existe en la lista
-              const existingProduct = prevData.find(p => p.id === foundProduct.id);
-              if (!existingProduct) {
-                return [foundProduct, ...prevData];
-              } else {
-                // Si ya existe, moverlo al inicio y activar animación
-                const filteredData = prevData.filter(p => p.id !== foundProduct.id);
-                return [foundProduct, ...filteredData];
-              }
-            } else {
-              // Si no hay productos, establecer solo el encontrado
-              return [foundProduct];
-            }
-          });
-          
-          // Activar animación para el producto encontrado con más delay
-          setTimeout(() => {
-            animateScannedProduct(foundProduct.id);
-          }, 300); // Más delay para asegurar que se renderice
-          
-          console.log('Producto encontrado:', foundProduct);
-        } else {
-          setError(`No se encontró producto con código: ${data}`);
         }
+        
+        // Si ya hay productos, agregar el nuevo a la lista existente
+        setData(prevData => {
+          if (prevData && prevData.length > 0) {
+            // Verificar si el producto ya existe en la lista
+            const existingProduct = prevData.find(p => p.id === foundProduct.id);
+            if (!existingProduct) {
+              return [foundProduct, ...prevData];
+            } else {
+              // Si ya existe, moverlo al inicio y activar animación
+              const filteredData = prevData.filter(p => p.id !== foundProduct.id);
+              return [foundProduct, ...filteredData];
+            }
+          } else {
+            // Si no hay productos, establecer solo el encontrado
+            return [foundProduct];
+          }
+        });
+        
+        // Activar animación para el producto encontrado con más delay
+        setTimeout(() => {
+          animateScannedProduct(foundProduct.id);
+        }, 300); // Más delay para asegurar que se renderice
+        
+        console.log('Producto encontrado:', foundProduct);
       } else {
-        setError('Error al buscar producto por código de barras');
+        console.log('❌ Producto no encontrado con código:', data);
+        setError(`No se encontró producto con código: ${data}`);
       }
     } catch (e: any) {
       setError(e?.message || 'Error al buscar producto');
     } finally {
       setScannerLoading(false);
     }
-  }, [scannedData, providerId, closeCamera, animateScannedProduct]);
+  }, [scannedData, allProducts, closeCamera, animateScannedProduct, searchQuery, searchTimeout]);
 
   // Funciones para manejar cantidades (cantidad a pedir)
   const updateQuantity = (productId: number, newQuantity: number) => {
@@ -1222,9 +1303,17 @@ export default function ProductsScreen() {
                 }`}>−</Text>
               </Pressable>
               
-              <View className="flex-1 px-2 items-center">
-                <Text className="text-lg font-bold text-gray-900">{currentQuantity}</Text>
-              </View>
+              <TextInput
+                className="flex-1 px-2 text-center text-lg font-bold text-gray-900"
+                value={currentQuantity.toString()}
+                onChangeText={(text) => {
+                  const value = parseInt(text) || 0;
+                  updateQuantity(item.id, Math.max(0, value));
+                }}
+                keyboardType="numeric"
+                selectTextOnFocus={true}
+                maxLength={4}
+              />
               
               <Pressable 
                 className="w-8 h-8 rounded items-center justify-center bg-gray-600"
@@ -1251,9 +1340,17 @@ export default function ProductsScreen() {
                 }`}>−</Text>
               </Pressable>
               
-              <View className="flex-1 px-2 items-center">
-                <Text className="text-lg font-bold text-gray-900">{currentStock}</Text>
-              </View>
+              <TextInput
+                className="flex-1 px-2 text-center text-lg font-bold text-gray-900"
+                value={currentStock.toString()}
+                onChangeText={(text) => {
+                  const value = parseInt(text) || 0;
+                  updateStockQuantity(item.id, Math.max(0, value));
+                }}
+                keyboardType="numeric"
+                selectTextOnFocus={true}
+                maxLength={4}
+              />
               
               <Pressable 
                 className="w-8 h-8 rounded items-center justify-center bg-gray-600"
@@ -1514,7 +1611,7 @@ export default function ProductsScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <Pressable onPress={clearSearch} className="ml-2 w-4 h-4 items-center justify-center bg-gray-100 rounded-full">
+                  <Pressable onPress={handleClearSearch} className="ml-2 w-4 h-4 items-center justify-center bg-gray-100 rounded-full">
                     <Text className="text-gray-500 text-xs font-bold">×</Text>
                   </Pressable>
                 )}
@@ -1559,6 +1656,8 @@ export default function ProductsScreen() {
           className="pl-4 pr-16 pt-2 pb-24"
           onViewableItemsChanged={onViewableItemsChangedRef.current}
           viewabilityConfig={viewabilityConfigRef.current}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           getItemLayout={(data, index) => ({
             length: 194, // Altura aproximada de cada item (del error: averageItemLength: 193.99)
             offset: 194 * index,
