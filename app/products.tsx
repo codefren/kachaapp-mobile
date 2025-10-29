@@ -6,7 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Pressable, RefreshControl, StatusBar, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Pressable, StatusBar, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Product {
@@ -69,6 +69,18 @@ export default function ProductsScreen() {
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   
+  // Estados para paginación alfabética
+  const [availableLetters, setAvailableLetters] = useState<string[]>([]);
+  const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  const [loadedLetters, setLoadedLetters] = useState<string[]>([]);
+  const [isAlphabeticalMode, setIsAlphabeticalMode] = useState<boolean>(true);
+  const [showLetterToast, setShowLetterToast] = useState<boolean>(false);
+  
+  // Estados para pre-carga progresiva
+  const [isPreloading, setIsPreloading] = useState<boolean>(false);
+  const [preloadProgress, setPreloadProgress] = useState<number>(0); // 0-100
+  const [letterIndexMap, setLetterIndexMap] = useState<Map<string, number>>(new Map()); // Letra -> índice en data
+  
   // Estados para cámara
   const [cameraVisible, setCameraVisible] = useState<boolean>(false);
   const [scannedData, setScannedData] = useState<string>('');
@@ -83,6 +95,20 @@ export default function ProductsScreen() {
   const nextUrlRef = useRef<string | null>(null);
   const dataRef = useRef<Product[] | null>(null);
   const isLoadingMoreRef = useRef<boolean>(false);
+  const isAlphabeticalModeRef = useRef<boolean>(true);
+  const isFetchingRef = useRef<boolean>(false); // Prevenir llamadas simultáneas
+  const flatListRef = useRef<any>(null); // Ref para scroll programático
+  
+  // Refs para onViewableItemsChanged (deben ser estables)
+  const viewabilityConfigRef = useRef({
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 100,
+  });
+  
+  // Inicializar con función vacía para evitar error de nullability
+  const onViewableItemsChangedRef = useRef<any>(({ viewableItems }: any) => {
+    // Esta función se actualizará en el useEffect
+  });
   
   // Actualizar refs cuando cambien los estados
   React.useEffect(() => {
@@ -95,6 +121,10 @@ export default function ProductsScreen() {
   React.useEffect(() => {
     isLoadingMoreRef.current = loadingMore;
   }, [loadingMore]);
+  
+  React.useEffect(() => {
+    isAlphabeticalModeRef.current = isAlphabeticalMode;
+  }, [isAlphabeticalMode]);
 
   // Log para verificar el estado de productos modificados
   React.useEffect(() => {
@@ -112,9 +142,37 @@ export default function ProductsScreen() {
     };
   }, [searchTimeout]);
 
-  const fetchProducts = useCallback(async (isRefresh = false, loadMore = false, searchName = '') => {
-
+  const fetchProducts = useCallback(async (
+    isRefresh = false, 
+    loadMore = false, 
+    searchName = '', 
+    letterStartsWith: string | null = null
+  ) => {
+    console.log('\n📥 === fetchProducts LLAMADO ===');
+    console.log('Parámetros:', { isRefresh, loadMore, searchName, letterStartsWith });
+    console.log('Estado actual:', { 
+      currentLetter,
+      loadedLetters,
+      isAlphabeticalMode,
+      hasNextPage,
+      dataLength: data?.length || 0
+    });
+    
+    // Prevenir llamadas simultáneas (excepto loadMore o isRefresh)
+    if (isFetchingRef.current && !loadMore && !isRefresh) {
+      console.warn('⚠️ fetchProducts ya en ejecución, ignorando llamada');
+      console.log('❌ === fetchProducts BLOQUEADO ===\n');
+      return;
+    }
+    
+    // Si es isRefresh (click del usuario), forzar liberación del lock anterior
+    if (isRefresh && isFetchingRef.current) {
+      console.log('🔄 isRefresh=true, forzando liberación del lock anterior');
+      isFetchingRef.current = false;
+    }
+    
     if (!token) {
+      console.error('❌ No hay token disponible');
       setError('No hay token de autenticación disponible');
       return;
     }
@@ -125,6 +183,12 @@ export default function ProductsScreen() {
     
     if (loadMore && isLoadingMoreRef.current) {
       return;
+    }
+
+    // Activar lock
+    if (!loadMore) {
+      isFetchingRef.current = true;
+      console.log('🔒 Lock activado (isFetchingRef = true)');
     }
 
     try {
@@ -149,33 +213,73 @@ export default function ProductsScreen() {
         }
       } else {
         // Construir URL base con provider y ordering
-        let baseUrl = `/api/products/?provider=${providerId}&ordering=name&page_size=20`;
+        let baseUrl = `/api/products/?provider=${providerId}&ordering=name&page_size=200`;
         
         // Agregar parámetro de búsqueda si existe
         if (searchName.trim()) {
           baseUrl += `&name=${encodeURIComponent(searchName.trim())}`;
         }
         
+        // Agregar filtro por letra inicial si existe
+        if (letterStartsWith) {
+          baseUrl += `&starts_with=${encodeURIComponent(letterStartsWith)}`;
+          console.log('🔤 Añadido filtro starts_with:', letterStartsWith);
+        }
+        
         url = baseUrl;
+        console.log('🌐 URL construida:', url);
       }
 
 
       const response = await apiMiddleware.get(url, true); // requiresAuth = true
       
+      console.log('📦 Respuesta recibida:', {
+        success: response.success,
+        statusCode: response.statusCode,
+        hasData: !!response.data
+      });
+      
       if (response.success && response.data) {
         const productsData = response.data as ProductsResponse;
         
-        // Log para verificar la estructura de los productos (solo en desarrollo)
-        // console.log('API Response - Products Data:', JSON.stringify(productsData, null, 2));
-        // console.log('First product structure:', JSON.stringify(productsData.results[0], null, 2));
+        console.log('📊 Datos del backend:', {
+          count: productsData.count,
+          results_length: productsData.results.length,
+          next: productsData.next,
+          first_product: productsData.results[0]?.name
+        });
 
         if (loadMore && dataRef.current) {
+          console.log('⬇️ APPEND: Agregando', productsData.results.length, 'productos al final');
           // Evitar duplicados al concatenar
           const existingIds = new Set(dataRef.current.map(item => item.id));
           const newProducts = productsData.results.filter(item => !existingIds.has(item.id));
           setData([...dataRef.current, ...newProducts]);
         } else {
           setData(productsData.results);
+        }
+        
+        // Registrar letra cargada si estamos en modo alfabético
+        // Usar ref para evitar problemas de closure
+        const currentIsAlphabeticalMode = isAlphabeticalModeRef.current;
+        console.log('🔍 Verificando si registrar letra:', {
+          letterStartsWith,
+          isAlphabeticalMode: currentIsAlphabeticalMode
+        });
+        
+        if (letterStartsWith && currentIsAlphabeticalMode) {
+          console.log('🅰️ Registrando letra cargada:', letterStartsWith);
+          setLoadedLetters(prev => {
+            if (!prev.includes(letterStartsWith)) {
+              const newLoadedLetters = [...prev, letterStartsWith].sort();
+              console.log('✅ loadedLetters actualizado:', prev, '→', newLoadedLetters);
+              return newLoadedLetters;
+            }
+            console.log('⚠️ Letra', letterStartsWith, 'ya estaba en loadedLetters:', prev);
+            return prev;
+          });
+        } else if (letterStartsWith && !currentIsAlphabeticalMode) {
+          console.log('⚠️ NO registra letra (modo no alfabético):', letterStartsWith);
         }
         
         setHasNextPage(!!productsData.next);
@@ -213,20 +317,231 @@ export default function ProductsScreen() {
       setRefreshing(false);
       setLoadingMore(false);
       isLoadingMoreRef.current = false;
+      
+      // Liberar lock
+      if (!loadMore) {
+        isFetchingRef.current = false;
+        console.log('🔓 Lock liberado (isFetchingRef = false)');
+      }
+      
+      console.log('✅ === fetchProducts FINALIZADO ===\n');
     }
   }, [token, providerId]); // Solo dependencias esenciales
 
+  // Función para obtener letras disponibles de TODO el catálogo
+  const fetchAvailableLetters = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const letters = new Set<string>();
+      let hasMore = true;
+      let page = 1;
+      const pageSize = 200;
+      
+      // Obtener todas las páginas para encontrar todas las letras
+      while (hasMore) {
+        const url = `/api/products/?provider=${providerId}&ordering=name&page_size=${pageSize}&page=${page}`;
+        const response = await apiMiddleware.get(url, true);
+        
+        if (response.success && response.data) {
+          const productsData = response.data as ProductsResponse;
+          
+          // Extraer primeras letras únicas
+          productsData.results.forEach(product => {
+            const firstLetter = product.name.charAt(0).toUpperCase();
+            if (/[A-Z]/.test(firstLetter)) {
+              letters.add(firstLetter);
+            }
+          });
+          
+          // Si ya tenemos las 26 letras, no necesitamos seguir
+          if (letters.size === 26) {
+            hasMore = false;
+          } else if (!productsData.next) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      setAvailableLetters(Array.from(letters).sort());
+    } catch (e) {
+      console.error('Error al obtener letras disponibles:', e);
+    }
+  }, [token, providerId]);
+
+  // Función para pre-cargar TODOS los productos progresivamente
+  const preloadAllProducts = useCallback(async () => {
+    if (!token || isPreloading) return;
+    
+    console.log('\n📦 === INICIANDO PRE-CARGA DE TODOS LOS PRODUCTOS ===');
+    setIsPreloading(true);
+    setPreloadProgress(0);
+    
+    try {
+      const allProducts: Product[] = [];
+      const letterIndex = new Map<string, number>();
+      let page = 1;
+      let hasMore = true;
+      let totalCount = 0;
+      
+      while (hasMore) {
+        const url = `/api/products/?provider=${providerId}&ordering=name&page_size=200&page=${page}`;
+        console.log(`📄 Cargando página ${page}...`);
+        
+        const response = await apiMiddleware.get(url, true);
+        
+        if (response.success && response.data) {
+          const productsData = response.data as ProductsResponse;
+          
+          // Procesar productos y construir índice de letras
+          productsData.results.forEach((product, localIndex) => {
+            const globalIndex = allProducts.length;
+            const firstLetter = product.name.charAt(0).toUpperCase();
+            
+            // Registrar primer producto de cada letra
+            if (/[A-Z]/.test(firstLetter) && !letterIndex.has(firstLetter)) {
+              letterIndex.set(firstLetter, globalIndex);
+              console.log(`🅰️ Letra ${firstLetter} comienza en índice ${globalIndex}`);
+            }
+            
+            allProducts.push(product);
+          });
+          
+          // Actualizar progreso
+          if (totalCount === 0 && productsData.count) {
+            totalCount = productsData.count;
+          }
+          
+          const progress = totalCount > 0 
+            ? Math.round((allProducts.length / totalCount) * 100)
+            : 0;
+          
+          setPreloadProgress(progress);
+          console.log(`📊 Progreso: ${allProducts.length}/${totalCount} (${progress}%)`);
+          
+          // Actualizar datos parcialmente cada página para UX fluida
+          setData([...allProducts]);
+          
+          // Verificar si hay más páginas
+          if (productsData.next) {
+            page++;
+            // Pequeño delay para no saturar el backend
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } else {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      // Guardar datos completos y mapa de índices
+      setData(allProducts);
+      setLetterIndexMap(letterIndex);
+      setAvailableLetters(Array.from(letterIndex.keys()).sort());
+      
+      console.log('✅ Pre-carga completada:', {
+        totalProducts: allProducts.length,
+        letters: Array.from(letterIndex.keys()).sort()
+      });
+      
+      // Detectar letra inicial
+      if (allProducts.length > 0) {
+        const firstLetter = allProducts[0].name.charAt(0).toUpperCase();
+        setCurrentLetter(firstLetter);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error en pre-carga:', error);
+      setError('Error al cargar el catálogo completo');
+    } finally {
+      setIsPreloading(false);
+      setPreloadProgress(100);
+      console.log('✅ === PRE-CARGA FINALIZADA ===\n');
+    }
+  }, [token, providerId, isPreloading]);
+
+  // Función para obtener la siguiente letra disponible
+  const getNextLetter = useCallback(() => {
+    if (!isAlphabeticalMode || availableLetters.length === 0) return null;
+    
+    // Encontrar la próxima letra que no se ha cargado
+    for (const letter of availableLetters) {
+      if (!loadedLetters.includes(letter)) {
+        return letter;
+      }
+    }
+    
+    return null; // Todas las letras han sido cargadas
+  }, [isAlphabeticalMode, availableLetters, loadedLetters]);
+
   const onRefresh = useCallback(() => {
+    console.log('\n🔄 onRefresh: Reiniciando pre-carga completa');
     setRefreshing(true);
-    setNextUrl(null);
-    fetchProducts(true);
-  }, [fetchProducts]);
+    setData([]);
+    setLetterIndexMap(new Map());
+    setAvailableLetters([]);
+    setCurrentLetter(null);
+    
+    // Reiniciar pre-carga
+    preloadAllProducts().finally(() => {
+      setRefreshing(false);
+    });
+  }, [preloadAllProducts]);
 
   const loadMoreProducts = useCallback(() => {
+    console.log('\n📦 === loadMoreProducts LLAMADO ===');
+    console.log('Estado:', {
+      hasNextPage,
+      loadingMore,
+      loading,
+      isAlphabeticalMode,
+      currentLetter,
+      loadedLetters,
+      nextUrl: nextUrlRef.current
+    });
+    
+    // Si hay más páginas de la letra actual, cargarlas
     if (hasNextPage && !loadingMore && !loading && nextUrlRef.current) {
+      console.log('📄 Hay más páginas de la letra actual, cargando siguiente página');
       fetchProducts(false, true);
+      console.log('✅ === loadMoreProducts FINALIZADO (loadMore) ===\n');
+      return;
     }
-  }, [hasNextPage, loadingMore, loading, fetchProducts]);
+    
+    // Si estamos en modo alfabético y no hay más páginas, cargar siguiente letra
+    if (isAlphabeticalMode && !hasNextPage && !loadingMore && !loading) {
+      const nextLetter = getNextLetter();
+      
+      console.log('🅰️ Modo alfabético: terminada letra actual');
+      console.log('Siguiente letra disponible:', nextLetter);
+      
+      if (nextLetter) {
+        console.log(`⬇️ Cargando siguiente letra: ${nextLetter}`);
+        setCurrentLetter(nextLetter);
+        
+        // Mostrar toast de la nueva letra
+        setShowLetterToast(true);
+        setTimeout(() => {
+          setShowLetterToast(false);
+        }, 800);
+        
+        // Cargar productos de la siguiente letra
+        fetchProducts(false, false, '', nextLetter);
+        console.log('✅ === loadMoreProducts FINALIZADO (nueva letra) ===\n');
+      } else {
+        console.log('✅ Todas las letras han sido cargadas');
+        console.log('✅ === loadMoreProducts FINALIZADO (fin) ===\n');
+      }
+    } else {
+      console.log('❌ No se cumplen condiciones para cargar más');
+      console.log('✅ === loadMoreProducts FINALIZADO (sin acción) ===\n');
+    }
+  }, [hasNextPage, loadingMore, loading, isAlphabeticalMode, fetchProducts, getNextLetter]);
 
   // Función para búsqueda de productos
   const searchProducts = useCallback(async (query: string) => {
@@ -234,6 +549,9 @@ export default function ProductsScreen() {
     
     setIsSearching(true);
     setNextUrl(null);
+    setCurrentLetter(null);
+    setIsAlphabeticalMode(false); // Desactivar modo alfabético al buscar
+    setLoadedLetters([]);
     
     try {
       await fetchProducts(false, false, query);
@@ -256,6 +574,61 @@ export default function ProductsScreen() {
     fetchProducts(true); // Refresh para obtener página 1 de la lista original
   }, [fetchProducts, searchTimeout]);
 
+  // Función para manejar presión de letra en el índice alfabético
+  const handleLetterPress = useCallback((letter: string) => {
+    console.log('\n🔤 === handleLetterPress (SCROLL) LLAMADO ===');
+    console.log('Letra presionada:', letter);
+    console.log('currentLetter actual:', currentLetter);
+    
+    // Obtener índice de la letra
+    const index = letterIndexMap.get(letter);
+    
+    if (index !== undefined && flatListRef.current && data) {
+      console.log(`⬇️ Haciendo scroll a letra ${letter}, índice ${index}`);
+      
+      // Actualizar letra actual
+      setCurrentLetter(letter);
+      
+      // Mostrar toast
+      setShowLetterToast(true);
+      setTimeout(() => {
+        setShowLetterToast(false);
+      }, 800);
+      
+      // Scroll a la posición
+      try {
+        flatListRef.current.scrollToIndex({
+          index: index,
+          animated: true,
+          viewPosition: 0, // Arriba de la pantalla
+        });
+        console.log('✅ Scroll ejecutado correctamente');
+      } catch (error) {
+        console.warn('⚠️ Error en scrollToIndex, usando scrollToOffset:', error);
+        // Fallback: calcular offset aproximado
+        const estimatedOffset = index * 100; // Altura estimada por item
+        flatListRef.current.scrollToOffset({
+          offset: estimatedOffset,
+          animated: true,
+        });
+      }
+    } else {
+      console.warn('⚠️ No se puede hacer scroll:', {
+        hasIndex: index !== undefined,
+        hasFlatListRef: !!flatListRef.current,
+        hasData: !!data,
+        dataLength: data?.length || 0
+      });
+      
+      // Si aún no se han cargado todos los datos, mostrar mensaje
+      if (isPreloading) {
+        console.log('📊 Carga aún en progreso:', preloadProgress + '%');
+      }
+    }
+    
+    console.log('✅ === handleLetterPress FINALIZADO ===\n');
+  }, [currentLetter, letterIndexMap, flatListRef, data, isPreloading, preloadProgress]);
+
   // Función para manejar cambios en el search query con debounce
   const handleSearchChange = useCallback((text: string) => {
     setSearchQuery(text);
@@ -276,16 +649,74 @@ export default function ProductsScreen() {
     // Configurar nuevo timeout para búsqueda
     const newTimeout = setTimeout(() => {
       searchProducts(text);
-    }, 500); // 500ms de delay
+    }, 500) as any; // 500ms de delay
     
     setSearchTimeout(newTimeout);
   }, [searchTimeout, searchProducts, fetchProducts]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchProducts();
-    }, [fetchProducts])
+      console.log('\n🔍 useFocusEffect disparado');
+      console.log('Estado actual:', {
+        dataLength: data?.length || 0,
+        isPreloading,
+        preloadProgress
+      });
+      
+      // Solo cargar si NO hay datos y NO está pre-cargando
+      if ((!data || data.length === 0) && !isPreloading) {
+        console.log('✅ No hay datos, iniciando pre-carga completa...');
+        preloadAllProducts();
+      } else if (isPreloading) {
+        console.log('📊 Pre-carga en progreso:', preloadProgress + '%');
+      } else {
+        console.log('✅ Datos ya cargados:', data?.length, 'productos');
+      }
+    }, [data, isPreloading, preloadProgress, preloadAllProducts])
   );
+  
+  // Efecto para iniciar con la primera letra cuando se cargan las letras disponibles
+  // YA NO ES NECESARIO: preloadAllProducts maneja todo
+  // React.useEffect(() => {
+  //   ...
+  // }, [availableLetters]);
+
+  // Efecto para actualizar onViewableItemsChanged
+  React.useEffect(() => {
+    onViewableItemsChangedRef.current = ({ viewableItems }: any) => {
+      // Usar ref para evitar problemas de closure
+      const currentIsAlphabeticalMode = isAlphabeticalModeRef.current;
+      
+      console.log('\n👁️ onViewableItemsChanged disparado');
+      console.log('isAlphabeticalMode (ref):', currentIsAlphabeticalMode);
+      console.log('viewableItems.length:', viewableItems.length);
+      
+      if (!currentIsAlphabeticalMode || viewableItems.length === 0) {
+        console.log('❌ Saliendo: modo no alfabético o sin items visibles');
+        return;
+      }
+      
+      const firstVisibleItem = viewableItems[0]?.item;
+      console.log('Primer item visible:', firstVisibleItem?.name);
+      
+      if (firstVisibleItem && firstVisibleItem.name) {
+        const firstLetter = firstVisibleItem.name.charAt(0).toUpperCase();
+        console.log('Primera letra detectada:', firstLetter);
+        console.log('currentLetter actual:', currentLetter);
+        
+        // Solo actualizar currentLetter si la letra es válida y diferente
+        // NO recargar datos, solo actualizar el visual del sidebar
+        if (/[A-Z]/.test(firstLetter) && firstLetter !== currentLetter) {
+          console.log('✅ Actualizando currentLetter de', currentLetter, 'a', firstLetter);
+          console.log('⚠️ IMPORTANTE: Solo actualiza visual, NO recarga datos');
+          setCurrentLetter(firstLetter);
+        } else {
+          console.log('❌ No actualiza: letra inválida o igual a actual');
+        }
+      }
+      console.log('👁️ onViewableItemsChanged finalizado\n');
+    };
+  }, [currentLetter]); // isAlphabeticalMode se usa via ref
 
   // Función para toggle de detalles expandidos
   const toggleDetails = (productId: number) => {
@@ -1098,21 +1529,58 @@ export default function ProductsScreen() {
             </View>
           </View>
           
+          {/* Indicador de progreso de pre-carga */}
+          {isPreloading && preloadProgress < 100 && (
+            <View className="px-4 py-2 bg-emerald-50 border-b border-emerald-200">
+              <View className="flex-row items-center justify-between mb-1">
+                <Text className="text-xs font-semibold text-emerald-700">
+                  Cargando catálogo completo...
+                </Text>
+                <Text className="text-xs font-bold text-emerald-700">
+                  {preloadProgress}%
+                </Text>
+              </View>
+              <View className="w-full h-1.5 bg-emerald-200 rounded-full overflow-hidden">
+                <View 
+                  className="h-full bg-emerald-500"
+                  style={{ width: `${preloadProgress}%` }}
+                />
+              </View>
+            </View>
+          )}
+          
         </View>
         
         <FlatList
+          ref={flatListRef}
           data={data || []}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderProduct}
-          className="px-4 pt-2 pb-24"
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          onEndReached={loadMoreProducts}
-          onEndReachedThreshold={0.3}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={10}
-          initialNumToRender={10}
-          getItemLayout={undefined}
+          className="pl-4 pr-16 pt-2 pb-24"
+          onViewableItemsChanged={onViewableItemsChangedRef.current}
+          viewabilityConfig={viewabilityConfigRef.current}
+          getItemLayout={(data, index) => ({
+            length: 194, // Altura aproximada de cada item (del error: averageItemLength: 193.99)
+            offset: 194 * index,
+            index,
+          })}
+          onScrollToIndexFailed={(info) => {
+            console.warn('⚠️ scrollToIndex failed:', info);
+            // Fallback: scroll usando offset calculado
+            const offset = info.averageItemLength * info.index;
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToOffset({
+                  offset: offset,
+                  animated: true,
+                });
+              }
+            }, 100);
+          }}
+          removeClippedSubviews={false}
+          maxToRenderPerBatch={20}
+          windowSize={21}
+          initialNumToRender={20}
           ListFooterComponent={renderFooter}
           ListEmptyComponent={
             !loading ? (
@@ -1126,6 +1594,67 @@ export default function ProductsScreen() {
           }
         />
       </View>
+      
+      {/* Toast de letra seleccionada */}
+      {showLetterToast && currentLetter && (
+        <View className="absolute inset-0 items-center justify-center" style={{ zIndex: 100 }} pointerEvents="none">
+          <View className="bg-gray-900/90 rounded-3xl px-12 py-10 shadow-2xl">
+            <Text className="text-white text-7xl font-black">{currentLetter}</Text>
+          </View>
+        </View>
+      )}
+      
+      {/* Índice alfabético lateral */}
+      {availableLetters.length > 0 && (
+        <View 
+          style={{ 
+            position: 'absolute',
+            right: 4,
+            top: 200, 
+            bottom: 100,
+            justifyContent: 'center',
+            zIndex: 50 
+          }}
+        >
+          <View className="bg-white/98 rounded-2xl py-3 px-2 shadow-2xl border-2 border-gray-200">
+            {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
+              const isAvailable = availableLetters.includes(letter);
+              const isActive = currentLetter === letter;
+              
+              return (
+                <Pressable
+                  key={letter}
+                  onPress={() => {
+                    if (isAvailable) {
+                      handleLetterPress(letter);
+                    }
+                  }}
+                  disabled={!isAvailable}
+                  style={{
+                    paddingVertical: 4,
+                    paddingHorizontal: 8,
+                    marginVertical: 2,
+                    borderRadius: 8,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 32,
+                    minHeight: 24,
+                    backgroundColor: isActive ? '#10b981' : 'transparent',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 12,
+                    fontWeight: '800',
+                    color: !isAvailable ? '#d1d5db' : isActive ? '#ffffff' : '#1f2937'
+                  }}>
+                    {letter}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
       
       {/* Botón flotante de enviar pedido */}
       {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length > 0 && (
