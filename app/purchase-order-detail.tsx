@@ -135,8 +135,8 @@ export default function PurchaseOrderDetailScreen() {
       
       if (response.success) {
         console.log('Orden actualizada exitosamente');
-        // Recargar datos
-        await fetchOrderDetail(true);
+        // Navegar a la lista de proveedores
+        router.push('/providers');
       } else {
         setError(response.error || 'Error al actualizar la orden');
       }
@@ -205,7 +205,12 @@ export default function PurchaseOrderDetailScreen() {
                 <Text className="text-xl font-bold text-gray-900">Orden de Compra</Text>
               </View>
               
-              <View className="w-10" />
+              <Pressable 
+                className="bg-emerald-600 rounded-lg px-3 py-2 items-center justify-center shadow-sm"
+                onPress={handleAddMoreProducts}
+              >
+                <Text className="text-white font-bold text-xs">+ Añadir</Text>
+              </Pressable>
             </View>
             
             {/* Info del proveedor */}
@@ -298,14 +303,6 @@ export default function PurchaseOrderDetailScreen() {
               </View>
             )}
           </View>
-          
-          {/* Botón para agregar más productos */}
-          <Pressable 
-            className="bg-white border-2 border-emerald-500 rounded-xl py-3 mb-4 items-center"
-            onPress={handleAddMoreProducts}
-          >
-            <Text className="text-emerald-600 font-bold text-base">+ Agregar más productos</Text>
-          </Pressable>
           
           {/* Resumen */}
           <View className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-24">

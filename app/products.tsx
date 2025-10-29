@@ -1362,23 +1362,33 @@ export default function ProductsScreen() {
           </View>
         </View>
         
-        {/* FILA 3: Collapse de Detalles */}
-        <View className="border-t border-gray-200">
+        {/* FILA 3: Botón de Detalles */}
+        <View className="border-t border-gray-200 px-3 py-2">
           <Pressable 
-            className="flex-row items-center justify-between px-3 py-2"
+            className={`flex-row items-center justify-center gap-1.5 py-2 px-3 rounded-lg self-end ${
+              isExpanded ? 'bg-gray-200' : 'bg-gradient-to-r from-slate-50 to-slate-100 border border-gray-300'
+            }`}
+            style={{
+              backgroundColor: isExpanded ? '#e5e7eb' : '#f8fafc',
+              borderWidth: 1,
+              borderColor: isExpanded ? '#9ca3af' : '#d1d5db',
+            }}
             onPress={() => toggleDetails(item.id)}
           >
-            <Text className="text-sm font-semibold text-gray-700">
-              Detalles del producto
+            <Text className={`text-xs font-semibold ${
+              isExpanded ? 'text-gray-700' : 'text-gray-600'
+            }`}>
+              {isExpanded ? 'Ocultar' : 'Ver detalles'}
             </Text>
-            <Text className={`text-base font-bold text-gray-500 transform ${
-              isExpanded ? 'rotate-180' : 'rotate-0'
+            <Text className={`text-xs font-bold transform ${
+              isExpanded ? 'rotate-180 text-gray-700' : 'rotate-0 text-gray-500'
             }`}>
               ▼
             </Text>
           </Pressable>
-          
-          {isExpanded && (
+        </View>
+        
+        {isExpanded && (
             <View className="px-4 pb-4 bg-gray-50 gap-2">
               {/* Código */}
               <View className="flex-row items-center gap-3 py-1">
@@ -1446,7 +1456,6 @@ export default function ProductsScreen() {
               )}
             </View>
           )}
-        </View>
       </Animated.View>
     );
   };
@@ -1623,6 +1632,32 @@ export default function ProductsScreen() {
                   <ActivityIndicator size="small" color="#10b981" />
                 </View>
               )}
+              
+              {/* Botón de Enviar Pedido */}
+              {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length > 0 && (
+                <Pressable 
+                  className={`rounded-lg px-4 py-2.5 items-center justify-center shadow-sm ${
+                    submitting ? 'bg-gray-400' : 'bg-emerald-600'
+                  }`}
+                  onPress={handleSubmitOrder}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <View className="flex-row items-center gap-1.5">
+                      <Text className="text-sm font-bold text-white">
+                        Enviar
+                      </Text>
+                      <View className="bg-emerald-700 rounded-full px-1.5 py-0.5 min-w-5">
+                        <Text className="text-xs font-bold text-white text-center">
+                          {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </Pressable>
+              )}
             </View>
           </View>
           
@@ -1709,77 +1744,50 @@ export default function ProductsScreen() {
           style={{ 
             position: 'absolute',
             right: 4,
-            top: 200, 
-            bottom: 100,
+            top: 200,
+            bottom: 120,
             justifyContent: 'center',
             zIndex: 50 
           }}
         >
-          <View className="bg-white/98 rounded-2xl py-3 px-2 shadow-2xl border-2 border-gray-200">
-            {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
-              const isAvailable = availableLetters.includes(letter);
-              const isActive = currentLetter === letter;
-              
-              return (
-                <Pressable
-                  key={letter}
-                  onPress={() => {
-                    if (isAvailable) {
-                      handleLetterPress(letter);
-                    }
-                  }}
-                  disabled={!isAvailable}
-                  style={{
-                    paddingVertical: 4,
-                    paddingHorizontal: 8,
-                    marginVertical: 2,
-                    borderRadius: 8,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 32,
-                    minHeight: 24,
-                    backgroundColor: isActive ? '#10b981' : 'transparent',
-                  }}
-                >
-                  <Text style={{
-                    fontSize: 12,
-                    fontWeight: '800',
-                    color: !isAvailable ? '#d1d5db' : isActive ? '#ffffff' : '#1f2937'
-                  }}>
-                    {letter}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View className="bg-white/98 rounded-2xl py-3 px-2 shadow-2xl border-2 border-gray-200" style={{ height: '100%', justifyContent: 'space-between' }}>
+              {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
+                const isAvailable = availableLetters.includes(letter);
+                const isActive = currentLetter === letter;
+                
+                return (
+                  <Pressable
+                    key={letter}
+                    onPress={() => {
+                      if (isAvailable) {
+                        handleLetterPress(letter);
+                      }
+                    }}
+                    disabled={!isAvailable}
+                    style={{
+                      paddingVertical: 3,
+                      paddingHorizontal: 7,
+                      borderRadius: 8,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: 28,
+                      backgroundColor: isActive ? '#10b981' : 'transparent',
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 11,
+                      fontWeight: '800',
+                      color: !isAvailable ? '#d1d5db' : isActive ? '#ffffff' : '#1f2937'
+                    }}>
+                      {letter}
+                    </Text>
+                  </Pressable>
+                );
+              })}
           </View>
         </View>
       )}
       
-      {/* Botón flotante de enviar pedido */}
-      {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length > 0 && (
-        <View className="absolute bottom-32 right-6">
-          <Pressable 
-            className={`rounded-xl px-6 py-4 items-center justify-center shadow-lg min-w-28 ${
-              submitting ? 'bg-gray-400' : 'bg-emerald-600 shadow-emerald-600/25'
-            }`}
-            onPress={handleSubmitOrder}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <View className="items-center">
-                <Text className="text-lg font-bold text-white leading-6 mb-1">
-                  Enviar ›
-                </Text>
-                <Text className="text-sm font-medium text-emerald-100">
-                  {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length} productos
-                </Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
-      )}
       
       <BottomMenu activeTab="tools" />
       
