@@ -53,6 +53,7 @@ function AppContent() {
       style={styles.container}
     >
       <ScrollView 
+        keyboardShouldPersistTaps='handled'
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >

@@ -1,9 +1,11 @@
 import FruitPreloader from "@/components/ui/FruitPreloader";
 import { useAuth } from "@/context/AuthContext";
-import React, { useState } from "react";
+import { locationService } from "@/services/locationService";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -26,9 +28,28 @@ export default function LoginForm({
 }: LoginFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { state, login } = useAuth();
+  const usernameRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  // Request location permissions on component mount
+  useEffect(() => {
+    const requestPermissions = async () => {
+      try {
+        await locationService.requestPermissions();
+      } catch (error) {
+        // Ignore errors, permissions will be requested when needed
+      }
+    };
+    requestPermissions();
+  }, []);
 
   const handleLogin = async () => {
+    usernameRef.current?.blur();
+    passwordRef.current?.blur();
+    Keyboard.dismiss();
+
     if (!username || !password) {
       Alert.alert("Error", "Por favor completa todos los campos");
       return;
@@ -113,6 +134,7 @@ export default function LoginForm({
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Usuario</Text>
             <TextInput
+              ref={usernameRef}
               value={username}
               onChangeText={setUsername}
               placeholder="nombre_usuario"
@@ -130,25 +152,37 @@ export default function LoginForm({
           {/* Password Field */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Contraseña</Text>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor="#64748b"
-              autoCapitalize="none"
-              secureTextEntry
-              autoComplete="password"
-              editable={!state.isLoading}
-              style={[
-                styles.textInput,
-                state.isLoading && styles.textInputDisabled,
-              ]}
-            />
+            <View style={styles.passwordInputContainer}>
+              <TextInput
+                ref={passwordRef}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                placeholderTextColor="#64748b"
+                autoCapitalize="none"
+                secureTextEntry={!showPassword}
+                autoComplete="password"
+                editable={!state.isLoading}
+                style={[
+                  styles.passwordInput,
+                  state.isLoading && styles.passwordInputDisabled,
+                ]}
+              />
+              <Pressable
+                style={styles.eyeIconContainer}
+                onPress={() => setShowPassword(!showPassword)}
+                disabled={state.isLoading}
+              >
+                <Text style={styles.eyeIcon}>
+                  {showPassword ? "Ocultar" : "Mostrar"}
+                </Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* Login Button */}
           <Pressable
-            onPress={handleLogin}
+            onPress={() => handleLogin()}
             disabled={state.isLoading}
             style={[
               styles.loginButton,
@@ -273,6 +307,38 @@ const styles = StyleSheet.create({
   textInputDisabled: {
     backgroundColor: "#f8fafc", // slate-50
     color: "#94a3b8", // slate-400
+  },
+
+  // Password Input Styles
+  passwordInputContainer: {
+    position: "relative",
+  },
+  passwordInput: {
+    width: "100%",
+    height: 48,
+    paddingHorizontal: 16,
+    paddingRight: 48,
+    backgroundColor: "#f1f5f9", // slate-100
+    borderWidth: 1,
+    borderColor: "#cbd5e1", // slate-300
+    borderRadius: 8,
+    color: "#0f172a", // slate-900
+    fontSize: 16,
+  },
+  passwordInputDisabled: {
+    backgroundColor: "#f8fafc", // slate-50
+    color: "#94a3b8", // slate-400
+  },
+  eyeIconContainer: {
+    position: "absolute",
+    right: 12,
+    top: "50%",
+    transform: [{ translateY: -12 }],
+    padding: 4,
+  },
+  eyeIcon: {
+    fontSize: 14,
+    color: "#64748b", // slate-500
   },
 
   // Button Styles
