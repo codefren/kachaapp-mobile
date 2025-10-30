@@ -158,7 +158,7 @@ export default function LoginForm({
             ]}
           >
             <Text style={styles.loginButtonText}>
-              {state.isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
+              {state.isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
             </Text>
           </Pressable>
 

@@ -2,22 +2,33 @@ import BottomMenu from "@/components/navigation/BottomMenu";
 import { useAuth } from "@/context/AuthContext";
 import "@/global.css";
 import { apiMiddleware } from "@/middleware/api";
+import WheelPicker, {
+  withVirtualized,
+} from "@quidone/react-native-wheel-picker";
 import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
   SectionList,
   StatusBar,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const VirtualizedWheelPicker = withVirtualized(WheelPicker);
 
 interface PurchaseOrderItem {
   id?: number;
@@ -65,6 +76,20 @@ export default function PurchaseOrderDetailScreen() {
   >([]);
   const sectionListRef =
     useRef<SectionList<PurchaseOrderItem & { originalIndex: number }>>(null);
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [currentEditingIndex, setCurrentEditingIndex] = useState<number | null>(
+    null
+  );
+
+  const data = useMemo(
+    () =>
+      Array.from({ length: 1000 }, (_, i) => ({
+        label: String(i + 1),
+        value: i + 1,
+      })),
+    []
+  );
 
   useEffect(() => {
     if (orderData?.items) {
@@ -335,59 +360,18 @@ export default function PurchaseOrderDetailScreen() {
                 <Text className="text-xs font-medium text-gray-600 mb-1">
                   Cantidad a pedir
                 </Text>
-                <View className="flex-row items-center bg-gray-50 border border-gray-200 rounded-lg p-2 max-w-[200px]">
-                  <Pressable
-                    className={`w-7 h-7 rounded items-center justify-center ${
-                      (editingQuantities[item.originalIndex] || 0) > 0
-                        ? "bg-gray-600"
-                        : "bg-gray-300"
-                    }`}
-                    onPress={() =>
-                      updateQuantity(
-                        item.originalIndex,
-                        Math.max(
-                          0,
-                          (editingQuantities[item.originalIndex] || 0) - 1
-                        )
-                      )
-                    }
-                    disabled={
-                      (editingQuantities[item.originalIndex] || 0) === 0
-                    }
-                  >
-                    <Text
-                      className={`text-sm font-bold ${
-                        (editingQuantities[item.originalIndex] || 0) > 0
-                          ? "text-white"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      −
-                    </Text>
-                  </Pressable>
-
-                  <TextInput
-                    className="flex-1 text-center text-sm font-bold text-gray-900"
-                    value={String(editingQuantities[item.originalIndex] || 0)}
-                    onChangeText={(text) => {
-                      const num = parseInt(text) || 0;
-                      updateQuantity(item.originalIndex, num);
-                    }}
-                    keyboardType="numeric"
-                  />
-
-                  <Pressable
-                    className="w-7 h-7 rounded items-center justify-center bg-gray-600"
-                    onPress={() =>
-                      updateQuantity(
-                        item.originalIndex,
-                        (editingQuantities[item.originalIndex] || 0) + 1
-                      )
-                    }
-                  >
-                    <Text className="text-sm font-bold text-white">+</Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  className="bg-gray-50 border border-gray-200 rounded-lg p-2 max-w-[200px] items-center"
+                  onPress={() => {
+                    console.log("Pressed, index:", item.originalIndex);
+                    setCurrentEditingIndex(item.originalIndex);
+                    setModalVisible(true);
+                  }}
+                >
+                  <Text className="text-sm font-bold text-gray-900">
+                    {editingQuantities[item.originalIndex] || 0}
+                  </Text>
+                </Pressable>
               </View>
             </View>
           )}
@@ -517,6 +501,97 @@ export default function PurchaseOrderDetailScreen() {
           )}
         </Pressable>
       </View>
+
+      <Modal
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+        animationType="slide"
+        transparent={true}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "rgba(0,0,0,0.5)",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "white",
+              padding: 16,
+              width: "80%",
+              maxWidth: 400,
+              borderRadius: 10,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 4,
+              elevation: 5,
+            }}
+          >
+            <Text
+              style={{
+                textAlign: "center",
+                fontSize: 18,
+                fontWeight: "bold",
+                marginBottom: 16,
+              }}
+            >
+              Seleccionar cantidad
+            </Text>
+
+            <VirtualizedWheelPicker
+              data={data}
+              value={editingQuantities[currentEditingIndex!] || 1}
+              onValueChanged={(event: any) =>
+                setEditingQuantities((prev) => ({
+                  ...prev,
+                  [currentEditingIndex!]: event.item.value,
+                }))
+              }
+            />
+
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginTop: 16,
+              }}
+            >
+              <Pressable
+                onPress={() => setModalVisible(false)}
+                style={{
+                  backgroundColor: "#ccc",
+                  padding: 12,
+                  borderRadius: 8,
+                  flex: 1,
+                  marginRight: 8,
+                }}
+              >
+                <Text style={{ color: "#333", textAlign: "center" }}>
+                  Cancelar
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setModalVisible(false)}
+                style={{
+                  backgroundColor: "#10b981",
+                  padding: 12,
+                  borderRadius: 8,
+                  flex: 1,
+                  marginLeft: 8,
+                }}
+              >
+                <Text style={{ color: "white", textAlign: "center" }}>
+                  Confirmar
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <BottomMenu activeTab="tools" />
     </SafeAreaView>
