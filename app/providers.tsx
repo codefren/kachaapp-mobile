@@ -631,7 +631,7 @@ export default function ProvidersScreen() {
 
           <View style={styles.texts}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{item.name}+"alfo"</Text>
+              <Text style={styles.name}>{item.name}</Text>
               <View
                 style={[
                   styles.timeChip,
