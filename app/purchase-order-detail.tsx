@@ -194,14 +194,7 @@ export default function PurchaseOrderDetailScreen() {
         <View className="bg-white border-b border-gray-100 shadow-sm">
           <View className="px-5 py-4">
             <View className="flex-row items-center justify-between mb-2">
-              <Pressable 
-                className="w-10 h-10 rounded-lg bg-gray-100 items-center justify-center" 
-                onPress={() => router.back()}
-              >
-                <Text className="text-gray-700 text-lg font-bold">‹</Text>
-              </Pressable>
-              
-              <View className="flex-1 items-center mx-4">
+              <View className="flex-1">
                 <Text className="text-xl font-bold text-gray-900">Orden de Compra</Text>
               </View>
               

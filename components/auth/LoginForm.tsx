@@ -136,6 +136,7 @@ export default function LoginForm({
               placeholder="••••••••"
               placeholderTextColor="#64748b"
               secureTextEntry
+              autoCapitalize="none"
               autoComplete="password"
               editable={!state.isLoading}
               style={[

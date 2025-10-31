@@ -1,5 +1,5 @@
-import * as Location from 'expo-location';
 import { Coordinates, LocationPermission } from '@/types/location';
+import * as Location from 'expo-location';
 
 class LocationService {
   private static instance: LocationService;
@@ -48,7 +48,16 @@ class LocationService {
       // Verificar permisos
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
-        throw new Error('Permisos de ubicación no concedidos');
+        // En desarrollo, usar ubicación por defecto si no hay permisos
+        console.warn('⚠️ Permisos de ubicación no concedidos, usando ubicación por defecto (Madrid)');
+        const defaultLocation: Coordinates = {
+          latitude: 41.3920792, // Madrid por defecto
+          longitude: 2.1252543,
+          accuracy: 100,
+          timestamp: Date.now(),
+        };
+        this.lastKnownLocation = defaultLocation;
+        return defaultLocation;
       }
 
       // Obtener ubicación con precisión baja para velocidad

@@ -6,7 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Pressable, StatusBar, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, FlatList, Image, Modal, Pressable, StatusBar, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Product {
@@ -60,8 +60,6 @@ export default function ProductsScreen() {
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
   const [networkError, setNetworkError] = useState<boolean>(false);
-  const [quantities, setQuantities] = useState<{ [key: number]: number }>({});
-  const [stockQuantities, setStockQuantities] = useState<{ [key: number]: number }>({});
   const [expandedDetails, setExpandedDetails] = useState<{ [key: number]: boolean }>({});
   
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -69,6 +67,7 @@ export default function ProductsScreen() {
   const [modifiedProducts, setModifiedProducts] = useState<ModifiedProduct[]>([]);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [showExitModal, setShowExitModal] = useState<boolean>(false);
   
   // Estados para paginación alfabética
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
@@ -83,14 +82,18 @@ export default function ProductsScreen() {
   const [letterIndexMap, setLetterIndexMap] = useState<Map<string, number>>(new Map()); // Letra -> índice en data
   
   // Estados para cámara
-  const [cameraVisible, setCameraVisible] = useState<boolean>(false);
   const [scannedData, setScannedData] = useState<string>('');
+  const [cameraVisible, setCameraVisible] = useState<boolean>(false);
+  const [scannerLoading, setScannerLoading] = useState<boolean>(false);
   const [permission, requestPermission] = useCameraPermissions();
   
   // Estados para animación de producto escaneado
   const [scannedProductId, setScannedProductId] = useState<number | null>(null);
-  const [scannerLoading, setScannerLoading] = useState<boolean>(false);
   const colorAnim = useRef(new Animated.Value(0)).current;
+  const lastScrollLogRef = useRef<number>(0);
+  
+  // Flag para controlar carga única de orden existente
+  const hasLoadedOrderRef = useRef<boolean>(false);
   
   // Usar refs para evitar dependencias en useCallback
   const nextUrlRef = useRef<string | null>(null);
@@ -105,6 +108,9 @@ export default function ProductsScreen() {
     itemVisiblePercentThreshold: 50,
     minimumViewTime: 100,
   });
+  
+  // Ref para debounce de actualización de letra
+  const letterUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Inicializar con función vacía para evitar error de nullability
   const onViewableItemsChangedRef = useRef<any>(({ viewableItems }: any) => {
@@ -142,6 +148,35 @@ export default function ProductsScreen() {
       }
     };
   }, [searchTimeout]);
+
+  // Función para manejar el botón de volver atrás
+  const handleBack = useCallback(() => {
+    // Verificar si hay productos modificados sin guardar
+    const hasUnsavedChanges = modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length > 0;
+    
+    if (hasUnsavedChanges) {
+      // Mostrar modal de confirmación
+      setShowExitModal(true);
+    } else {
+      // No hay cambios, volver directamente
+      router.back();
+    }
+  }, [modifiedProducts, router]);
+
+  // Manejar botón de hardware de Android
+  React.useEffect(() => {
+    const backAction = () => {
+      handleBack();
+      return true; // Prevenir comportamiento por defecto
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, [handleBack]);
 
   const fetchProducts = useCallback(async (
     isRefresh = false, 
@@ -735,20 +770,22 @@ export default function ProductsScreen() {
       console.log('\n🔍 useFocusEffect disparado');
       console.log('Estado actual:', {
         dataLength: data?.length || 0,
+        allProductsLength: allProducts?.length || 0,
         isPreloading,
         preloadProgress
       });
       
-      // Solo cargar si NO hay datos y NO está pre-cargando
-      if ((!data || data.length === 0) && !isPreloading) {
-        console.log('✅ No hay datos, iniciando pre-carga completa...');
+      // Solo cargar si NO hay datos cargados (verificar allProducts, no data)
+      // data puede ser 0 cuando la búsqueda no tiene resultados
+      if ((!allProducts || allProducts.length === 0) && !isPreloading) {
+        console.log('✅ No hay datos cargados, iniciando pre-carga completa...');
         preloadAllProducts();
       } else if (isPreloading) {
         console.log('📊 Pre-carga en progreso:', preloadProgress + '%');
       } else {
-        console.log('✅ Datos ya cargados:', data?.length, 'productos');
+        console.log('✅ Datos ya cargados:', allProducts?.length, 'productos (mostrando', data?.length, ')');
       }
-    }, [data, isPreloading, preloadProgress, preloadAllProducts])
+    }, [allProducts, data, isPreloading, preloadProgress, preloadAllProducts])
   );
   
   // Efecto para iniciar con la primera letra cuando se cargan las letras disponibles
@@ -757,40 +794,42 @@ export default function ProductsScreen() {
   //   ...
   // }, [availableLetters]);
 
-  // Efecto para actualizar onViewableItemsChanged
+  // Efecto para actualizar onViewableItemsChanged con debounce
   React.useEffect(() => {
     onViewableItemsChangedRef.current = ({ viewableItems }: any) => {
       // Usar ref para evitar problemas de closure
       const currentIsAlphabeticalMode = isAlphabeticalModeRef.current;
       
-      console.log('\n👁️ onViewableItemsChanged disparado');
-      console.log('isAlphabeticalMode (ref):', currentIsAlphabeticalMode);
-      console.log('viewableItems.length:', viewableItems.length);
-      
       if (!currentIsAlphabeticalMode || viewableItems.length === 0) {
-        console.log('❌ Saliendo: modo no alfabético o sin items visibles');
         return;
       }
       
       const firstVisibleItem = viewableItems[0]?.item;
-      console.log('Primer item visible:', firstVisibleItem?.name);
       
       if (firstVisibleItem && firstVisibleItem.name) {
         const firstLetter = firstVisibleItem.name.charAt(0).toUpperCase();
-        console.log('Primera letra detectada:', firstLetter);
-        console.log('currentLetter actual:', currentLetter);
         
         // Solo actualizar currentLetter si la letra es válida y diferente
-        // NO recargar datos, solo actualizar el visual del sidebar
         if (/[A-Z]/.test(firstLetter) && firstLetter !== currentLetter) {
-          console.log('✅ Actualizando currentLetter de', currentLetter, 'a', firstLetter);
-          console.log('⚠️ IMPORTANTE: Solo actualiza visual, NO recarga datos');
-          setCurrentLetter(firstLetter);
-        } else {
-          console.log('❌ No actualiza: letra inválida o igual a actual');
+          // Cancelar timeout anterior si existe
+          if (letterUpdateTimeoutRef.current) {
+            clearTimeout(letterUpdateTimeoutRef.current);
+          }
+          
+          // Crear nuevo timeout para actualizar la letra después de 150ms
+          letterUpdateTimeoutRef.current = setTimeout(() => {
+            console.log('🔤 Actualizando letra visual:', currentLetter, '→', firstLetter);
+            setCurrentLetter(firstLetter);
+          }, 150) as any;
         }
       }
-      console.log('👁️ onViewableItemsChanged finalizado\n');
+    };
+    
+    // Cleanup al desmontar
+    return () => {
+      if (letterUpdateTimeoutRef.current) {
+        clearTimeout(letterUpdateTimeoutRef.current);
+      }
     };
   }, [currentLetter]); // isAlphabeticalMode se usa via ref
 
@@ -864,16 +903,6 @@ export default function ProductsScreen() {
           
           setModifiedProducts(loadedProducts);
           
-          // También actualizar estados locales
-          const quantities: { [key: number]: number } = {};
-          const stocks: { [key: number]: number } = {};
-          loadedProducts.forEach(item => {
-            quantities[item.product] = item.quantity_units;
-            stocks[item.product] = item.amount_boxes;
-          });
-          setQuantities(quantities);
-          setStockQuantities(stocks);
-          
           console.log('Datos de orden cargados:', loadedProducts);
         }
       } else {
@@ -884,12 +913,14 @@ export default function ProductsScreen() {
     }
   }, [poId, token]);
 
-  // Cargar datos de orden existente al montar el componente
+  // Cargar datos de orden existente al montar el componente (solo una vez)
   React.useEffect(() => {
-    if (poId) {
+    if (poId && !hasLoadedOrderRef.current) {
+      console.log('🔄 Cargando orden existente (primera vez):', poId);
+      hasLoadedOrderRef.current = true;
       loadExistingOrderData();
     }
-  }, [loadExistingOrderData]);
+  }, [poId, loadExistingOrderData]);
 
   // Función para abrir la cámara
   const openCamera = useCallback(async () => {
@@ -950,7 +981,7 @@ export default function ProductsScreen() {
         'Código inválido',
         `El código "${data}" no es un EAN-13 válido.\n\nSolo se aceptan códigos de 13 dígitos numéricos.`
       );
-      setScannedData('');
+      // No establecer scannedData para permitir nuevo scan inmediatamente
       return;
     }
     
@@ -980,45 +1011,123 @@ export default function ProductsScreen() {
         // Cerrar cámara primero
         closeCamera();
         
-        // Limpiar búsqueda si existe para mostrar lista completa
-        if (searchQuery.trim()) {
-          setSearchQuery('');
-          if (searchTimeout) {
-            clearTimeout(searchTimeout);
-            setSearchTimeout(null);
+        // Buscar si el producto está en la lista visible actual
+        // Usar dataRef para acceder al estado actual sin conflicto de nombres
+        const currentData = (dataRef.current || []) as Product[];
+        const productIndex = currentData.findIndex((p: Product) => p.id === foundProduct.id);
+        
+        if (productIndex >= 0) {
+          // Producto está en la lista visible actual
+          console.log('📍 Producto visible en índice:', productIndex);
+          
+          // Hacer scroll al producto sin animación
+          if (flatListRef.current) {
+            setTimeout(() => {
+              console.log('═══════════════════════════════════════════════════════════════');
+              console.log('📍 [PRODUCTS SCROLL] Índice del producto:', productIndex);
+              console.log('📦 [PRODUCTS SCROLL] Nombre:', foundProduct.name);
+              console.log('📏 [PRODUCTS SCROLL] Total items:', currentData.length);
+              console.log('🎯 [PRODUCTS SCROLL] Usando scrollToIndex para mayor precisión');
+              
+              // Intentar obtener posición actual del scroll
+              try {
+                const scrollResponder = flatListRef.current?.getScrollResponder?.();
+                if (scrollResponder && scrollResponder._scrollMetrics) {
+                  console.log('📊 [ANTES] Offset actual:', scrollResponder._scrollMetrics.offset);
+                  console.log('📊 [ANTES] ContentLength:', scrollResponder._scrollMetrics.contentLength);
+                  console.log('📊 [ANTES] VisibleLength:', scrollResponder._scrollMetrics.visibleLength);
+                }
+              } catch (e) {
+                console.log('⚠️ No se pudo obtener métricas de scroll antes');
+              }
+              
+              console.log('═══════════════════════════════════════════════════════════════');
+              
+              try {
+                flatListRef.current?.scrollToIndex({
+                  index: productIndex,
+                  animated: false,
+                  viewPosition: 0,
+                  viewOffset: -1100, // Offset NEGATIVO para scrollear MÁS hacia abajo
+                });
+                console.log('✅ [PRODUCTS SCROLL] scrollToIndex ejecutado con viewOffset -1100');
+                
+                // Verificar posición después del scroll
+                setTimeout(() => {
+                  try {
+                    const scrollResponder = flatListRef.current?.getScrollResponder?.();
+                    if (scrollResponder && scrollResponder._scrollMetrics) {
+                      console.log('🎯 [DESPUÉS] Offset actual:', scrollResponder._scrollMetrics.offset);
+                      console.log('🎯 [DESPUÉS] Offset esperado (aprox):', productIndex * 194);
+                      console.log('🎯 [DESPUÉS] Diferencia:', Math.abs(scrollResponder._scrollMetrics.offset - (productIndex * 194)));
+                      
+                      // Activar listener para scroll manual del usuario
+                      console.log('👆 [SCROLL MANUAL] Esperando a que hagas scroll para encontrar el producto...');
+                      console.log('👆 [SCROLL MANUAL] Cuando encuentres el producto, mira los logs de posición');
+                    }
+                  } catch (e) {
+                    console.log('⚠️ No se pudo obtener métricas de scroll después');
+                  }
+                }, 300);
+                
+              } catch (error) {
+                console.error('❌ [PRODUCTS SCROLL] Error en scrollToIndex:', error);
+                // Fallback: usar scrollToOffset
+                const itemHeight = 194;
+                const targetOffset = productIndex * itemHeight;
+                flatListRef.current?.scrollToOffset({
+                  offset: targetOffset,
+                  animated: false,
+                });
+                console.log('⚠️ [PRODUCTS SCROLL] Usando fallback scrollToOffset:', targetOffset);
+              }
+            }, 200);
+          }
+        } else {
+          // Producto NO está en la lista visible (está filtrado)
+          console.log('⚠️ Producto no visible, restaurando lista completa');
+          
+          if (allProducts) {
+            // Restaurar lista completa
+            setData(allProducts);
+            setSearchQuery(''); // Limpiar búsqueda para mostrar todo
+            if (searchTimeout) {
+              clearTimeout(searchTimeout);
+              setSearchTimeout(null);
+            }
+            
+            // Buscar índice en lista completa
+            const fullListIndex = allProducts.findIndex(p => p.id === foundProduct.id);
+            
+            if (fullListIndex >= 0 && flatListRef.current) {
+              setTimeout(() => {
+                // Calcular offset exacto para que quede en el tope
+                const itemHeight = 194;
+                const targetOffset = fullListIndex * itemHeight;
+                
+                flatListRef.current?.scrollToOffset({
+                  offset: targetOffset,
+                  animated: false,
+                });
+              }, 100);
+            }
           }
         }
         
-        // Si ya hay productos, agregar el nuevo a la lista existente
-        setData(prevData => {
-          if (prevData && prevData.length > 0) {
-            // Verificar si el producto ya existe en la lista
-            const existingProduct = prevData.find(p => p.id === foundProduct.id);
-            if (!existingProduct) {
-              return [foundProduct, ...prevData];
-            } else {
-              // Si ya existe, moverlo al inicio y activar animación
-              const filteredData = prevData.filter(p => p.id !== foundProduct.id);
-              return [foundProduct, ...filteredData];
-            }
-          } else {
-            // Si no hay productos, establecer solo el encontrado
-            return [foundProduct];
-          }
-        });
-        
-        // Activar animación para el producto encontrado con más delay
+        // Activar animación para el producto encontrado
         setTimeout(() => {
           animateScannedProduct(foundProduct.id);
-        }, 300); // Más delay para asegurar que se renderice
+        }, 400);
         
-        console.log('Producto encontrado:', foundProduct);
+        console.log('✅ Producto escaneado:', foundProduct.name);
       } else {
         console.log('❌ Producto no encontrado con código:', data);
         setError(`No se encontró producto con código: ${data}`);
+        setScannedData(''); // Limpiar scannedData para permitir nuevo scan
       }
     } catch (e: any) {
       setError(e?.message || 'Error al buscar producto');
+      setScannedData(''); // Limpiar scannedData para permitir nuevo scan
     } finally {
       setScannerLoading(false);
     }
@@ -1030,27 +1139,16 @@ export default function ProductsScreen() {
     
     const currentValues = getModifiedProductValues(productId);
     updateModifiedProduct(productId, newQuantity, currentValues.amountBoxes);
-    
-    // Mantener el estado local para compatibilidad
-    setQuantities(prev => {
-      const updated = { ...prev };
-      if (newQuantity === 0) {
-        delete updated[productId];
-      } else {
-        updated[productId] = newQuantity;
-      }
-      return updated;
-    });
   };
 
   const incrementQuantity = (productId: number) => {
-    const currentQuantity = quantities[productId] || 0;
-    updateQuantity(productId, currentQuantity + 1);
+    const currentValues = getModifiedProductValues(productId);
+    updateQuantity(productId, currentValues.quantityUnits + 1);
   };
 
   const decrementQuantity = (productId: number) => {
-    const currentQuantity = quantities[productId] || 0;
-    updateQuantity(productId, Math.max(0, currentQuantity - 1));
+    const currentValues = getModifiedProductValues(productId);
+    updateQuantity(productId, Math.max(0, currentValues.quantityUnits - 1));
   };
 
   // Funciones para manejar stock actual
@@ -1059,27 +1157,29 @@ export default function ProductsScreen() {
     
     const currentValues = getModifiedProductValues(productId);
     updateModifiedProduct(productId, currentValues.quantityUnits, newQuantity);
-    
-    // Mantener el estado local para compatibilidad
-    setStockQuantities(prev => {
-      const updated = { ...prev };
-      if (newQuantity === 0) {
-        delete updated[productId];
-      } else {
-        updated[productId] = newQuantity;
-      }
-      return updated;
-    });
   };
 
   const incrementStock = (productId: number) => {
-    const currentStock = stockQuantities[productId] || 0;
-    updateStockQuantity(productId, currentStock + 1);
+    const currentValues = getModifiedProductValues(productId);
+    updateStockQuantity(productId, currentValues.amountBoxes + 1);
   };
 
   const decrementStock = (productId: number) => {
-    const currentStock = stockQuantities[productId] || 0;
-    updateStockQuantity(productId, Math.max(0, currentStock - 1));
+    const currentValues = getModifiedProductValues(productId);
+    updateStockQuantity(productId, Math.max(0, currentValues.amountBoxes - 1));
+  };
+
+  // Función para salir sin guardar
+  const handleExitWithoutSaving = () => {
+    setShowExitModal(false);
+    router.back();
+  };
+
+  // Función para guardar y salir
+  const handleSaveAndExit = async () => {
+    setShowExitModal(false);
+    await handleSubmitOrder();
+    // El router.push se ejecutará dentro de handleSubmitOrder si tiene éxito
   };
 
   // Función para enviar orden de compra
@@ -1148,8 +1248,6 @@ export default function ProductsScreen() {
 
         // Limpiar productos modificados
         setModifiedProducts([]);
-        setQuantities({});
-        setStockQuantities({});
       } else {
         setError(response.error || `Error al ${poId ? 'actualizar' : 'crear'} la orden de compra`);
       }
@@ -1549,7 +1647,7 @@ export default function ProductsScreen() {
           <View className="px-5 pt-4 pb-3">
             {/* Primera fila: Navegación, Título y Scanner */}
             <View className="flex-row items-center justify-between mb-4">
-              <Pressable className="w-10 h-10 rounded-lg bg-gray-100 items-center justify-center" onPress={() => router.back()}>
+              <Pressable className="w-10 h-10 rounded-lg bg-gray-100 items-center justify-center" onPress={handleBack}>
                 <View className="w-5 h-5 items-center justify-center">
                   <Text className="text-gray-700 text-lg font-bold">‹</Text>
                 </View>
@@ -1693,6 +1791,17 @@ export default function ProductsScreen() {
           viewabilityConfig={viewabilityConfigRef.current}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScroll={(event) => {
+            const offset = event.nativeEvent.contentOffset.y;
+            const itemIndex = Math.round(offset / 194);
+            // Solo logear cada 500ms para no saturar
+            const now = Date.now();
+            if (now - lastScrollLogRef.current > 500) {
+              console.log('👆 [SCROLL MANUAL] Offset actual:', Math.round(offset), '| Ítem aprox:', itemIndex);
+              lastScrollLogRef.current = now;
+            }
+          }}
+          scrollEventThrottle={400}
           getItemLayout={(data, index) => ({
             length: 194, // Altura aproximada de cada item (del error: averageItemLength: 193.99)
             offset: 194 * index,
@@ -1891,6 +2000,75 @@ export default function ProductsScreen() {
               </Pressable>
             </View>
           )}
+        </View>
+      </Modal>
+
+      {/* Modal de confirmación al salir sin guardar */}
+      <Modal
+        visible={showExitModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowExitModal(false)}
+      >
+        <View className="flex-1 bg-black/50 items-center justify-center p-4">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            {/* Ícono de advertencia */}
+            <View className="items-center mb-4">
+              <View className="w-16 h-16 bg-amber-100 rounded-full items-center justify-center">
+                <Text className="text-4xl">⚠️</Text>
+              </View>
+            </View>
+
+            {/* Título */}
+            <Text className="text-xl font-bold text-gray-900 text-center mb-2">
+              ¿Salir sin guardar?
+            </Text>
+
+            {/* Mensaje */}
+            <Text className="text-base text-gray-600 text-center mb-6">
+              Tienes productos sin guardar. ¿Estás seguro que deseas salir?
+            </Text>
+
+            {/* Contador de productos modificados */}
+            <View className="bg-amber-50 rounded-lg p-3 mb-6">
+              <Text className="text-sm text-amber-800 text-center font-semibold">
+                {modifiedProducts.filter(p => p.quantity_units > 0 || p.amount_boxes > 0).length} producto(s) sin guardar
+              </Text>
+            </View>
+
+            {/* Botones */}
+            <View className="space-y-3">
+              {/* Botón Guardar y Salir */}
+              <Pressable
+                className="bg-emerald-600 rounded-xl py-4 px-6 shadow-sm active:bg-emerald-700"
+                onPress={handleSaveAndExit}
+              >
+                <Text className="text-white font-bold text-center text-base">
+                  💾 Guardar y Salir
+                </Text>
+              </Pressable>
+
+              {/* Botón Salir sin Guardar */}
+              <Pressable
+                className="bg-red-500 rounded-xl py-4 px-6 shadow-sm active:bg-red-600"
+                onPress={handleExitWithoutSaving}
+              >
+                <Text className="text-white font-bold text-center text-base">
+                  Salir sin Guardar
+                </Text>
+              </Pressable>
+
+              {/* Botón Cancelar */}
+              <Pressable
+                className="bg-gray-200 rounded-xl py-4 px-6 active:bg-gray-300"
+                onPress={() => setShowExitModal(false)}
+              >
+                <Text className="text-gray-700 font-semibold text-center text-base">
+                  Cancelar
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>

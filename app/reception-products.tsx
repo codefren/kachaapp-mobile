@@ -235,12 +235,16 @@ export default function ReceptionProductsScreen() {
         
         // Cerrar formulario
         setExtraProductFormVisible(false);
+        setScannedData(''); // Limpiar scannedData para permitir nuevo scan
         
-        // Scroll al inicio y animar
+        // Scroll al inicio (producto estará en índice 0)
         setTimeout(() => {
-          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          if (flatListRef.current) {
+            // Scroll directo al inicio sin animación
+            flatListRef.current.scrollToOffset({ offset: 0, animated: false });
+          }
           animateScannedProduct(newProduct.product);
-        }, 300);
+        }, 100);
         
         Alert.alert('✅ Producto Extra Registrado', `${newProduct.product_name} agregado a la recepción`);
       } else {
@@ -256,10 +260,12 @@ export default function ReceptionProductsScreen() {
         }
         
         Alert.alert('Error al Registrar Producto Extra', errorMessage);
+        setScannedData(''); // Limpiar scannedData para permitir nuevo scan
       }
     } catch (e: any) {
       console.error('[ReceptionProducts] ❌ Error al registrar producto extra:', e);
       Alert.alert('Error', e?.message || 'Error al registrar producto extra');
+      setScannedData(''); // Limpiar scannedData para permitir nuevo scan
     } finally {
       setSubmitting(false);
     }
@@ -277,7 +283,7 @@ export default function ReceptionProductsScreen() {
         'Código inválido',
         `El código "${data}" no es un EAN-13 válido.\n\nSolo se aceptan códigos de 13 dígitos numéricos.`
       );
-      setScannedData('');
+      // No establecer scannedData para permitir nuevo scan inmediatamente
       return;
     }
     
@@ -306,28 +312,69 @@ export default function ReceptionProductsScreen() {
           return { ...prev, [foundProduct.product]: current + 1 };
         });
         
-        // Reordenar lista: poner el producto escaneado de primero
-        setOrderData(prev => {
-          if (!prev) return prev;
-          
-          const productIndex = prev.items.findIndex(item => item.product === foundProduct.product);
-          if (productIndex === -1) return prev;
-          
-          const reorderedItems = [...prev.items];
-          const [movedProduct] = reorderedItems.splice(productIndex, 1);
-          reorderedItems.unshift(movedProduct);
-          
-          return {
-            ...prev,
-            items: reorderedItems
-          };
-        });
+        // Buscar índice del producto en la lista actual
+        const currentData = orderData?.items || [];
+        const productIndex = currentData.findIndex(item => item.product === foundProduct.product);
         
-        // Scroll al inicio y animar
+        // Hacer scroll al producto sin animación
         setTimeout(() => {
-          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          if (productIndex >= 0 && flatListRef.current) {
+            console.log('═══════════════════════════════════════════════════════════════');
+            console.log('📍 [RECEPTION SCROLL] Producto en índice:', productIndex);
+            console.log('📦 [RECEPTION SCROLL] Producto:', foundProduct.product_name);
+            console.log('📏 [RECEPTION SCROLL] Items totales:', currentData.length);
+            console.log('🎯 [RECEPTION SCROLL] Usando scrollToIndex');
+            
+            // Intentar obtener posición actual del scroll
+            try {
+              const scrollResponder = flatListRef.current?.getScrollResponder?.();
+              if (scrollResponder && scrollResponder._scrollMetrics) {
+                console.log('📊 [ANTES] Offset actual:', scrollResponder._scrollMetrics.offset);
+                console.log('📊 [ANTES] ContentLength:', scrollResponder._scrollMetrics.contentLength);
+                console.log('📊 [ANTES] VisibleLength:', scrollResponder._scrollMetrics.visibleLength);
+              }
+            } catch (e) {
+              console.log('⚠️ No se pudo obtener métricas de scroll antes');
+            }
+            
+            console.log('═══════════════════════════════════════════════════════════════');
+            
+            try {
+              flatListRef.current.scrollToIndex({
+                index: productIndex,
+                animated: false,
+                viewPosition: 0, // 0 = exactamente en el tope
+              });
+              console.log('✅ [RECEPTION SCROLL] scrollToIndex ejecutado');
+              
+              // Verificar posición después del scroll
+              setTimeout(() => {
+                try {
+                  const scrollResponder = flatListRef.current?.getScrollResponder?.();
+                  if (scrollResponder && scrollResponder._scrollMetrics) {
+                    console.log('🎯 [DESPUÉS] Offset actual:', scrollResponder._scrollMetrics.offset);
+                    console.log('🎯 [DESPUÉS] Offset esperado (aprox):', productIndex * 130);
+                    console.log('🎯 [DESPUÉS] Diferencia:', Math.abs(scrollResponder._scrollMetrics.offset - (productIndex * 130)));
+                  }
+                } catch (e) {
+                  console.log('⚠️ No se pudo obtener métricas de scroll después');
+                }
+              }, 300);
+              
+            } catch (error) {
+              console.error('❌ [RECEPTION SCROLL] Error:', error);
+              // Fallback
+              const itemHeight = 130;
+              const targetOffset = productIndex * itemHeight;
+              flatListRef.current.scrollToOffset({
+                offset: targetOffset,
+                animated: false,
+              });
+              console.log('⚠️ [RECEPTION SCROLL] Fallback offset:', targetOffset);
+            }
+          }
           animateScannedProduct(foundProduct.product);
-        }, 300);
+        }, 200);
         
         console.log('[ReceptionProducts] 📊 Cantidad actualizada y reordenado para producto ID:', foundProduct.product);
       } else {
@@ -350,6 +397,7 @@ export default function ReceptionProductsScreen() {
     } catch (e: any) {
       console.error('[ReceptionProducts] ❌ Error al buscar producto:', e);
       Alert.alert('Error', e?.message || 'Error al buscar producto por código de barras');
+      setScannedData(''); // Limpiar scannedData para permitir nuevo scan
     } finally {
       setScannerLoading(false);
     }
@@ -773,7 +821,10 @@ export default function ReceptionProductsScreen() {
         animationType="slide"
         transparent={true}
         visible={extraProductFormVisible}
-        onRequestClose={() => setExtraProductFormVisible(false)}
+        onRequestClose={() => {
+          setExtraProductFormVisible(false);
+          setScannedData(''); // Limpiar scannedData para permitir nuevo scan
+        }}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'center', paddingHorizontal: 16 }}>
           <View style={{ backgroundColor: '#ffffff', borderRadius: 16, padding: 24, maxHeight: '80%' }}>
@@ -885,7 +936,10 @@ export default function ReceptionProductsScreen() {
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <Pressable
                   style={{ flex: 1, backgroundColor: '#f3f4f6', borderRadius: 8, paddingVertical: 14, alignItems: 'center' }}
-                  onPress={() => setExtraProductFormVisible(false)}
+                  onPress={() => {
+                    setExtraProductFormVisible(false);
+                    setScannedData(''); // Limpiar scannedData para permitir nuevo scan
+                  }}
                   disabled={submitting}
                 >
                   <Text style={{ fontSize: 16, fontWeight: '600', color: '#6b7280' }}>

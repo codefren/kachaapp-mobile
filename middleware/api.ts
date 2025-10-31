@@ -79,6 +79,13 @@ class ApiMiddleware {
   private async interceptResponse<T>(response: Response): Promise<ApiResponse<T>> {
     try {
       const data = await response.json();
+      
+      // Log para debug
+      console.log('📥 API Response:', {
+        status: response.status,
+        ok: response.ok,
+        data
+      });
 
       // Manejar diferentes códigos de estado
       if (response.ok) {
@@ -144,6 +151,13 @@ class ApiMiddleware {
       // Agregar body si existe
       if (requestConfig.body && requestConfig.method !== 'GET') {
         fetchConfig.body = JSON.stringify(requestConfig.body);
+        // Log para debug
+        console.log('🌐 API Request:', {
+          url,
+          method: requestConfig.method,
+          body: requestConfig.body,
+          headers: requestConfig.headers
+        });
       }
 
       const response = await fetch(url, fetchConfig);
