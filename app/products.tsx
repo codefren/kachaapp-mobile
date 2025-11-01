@@ -565,7 +565,7 @@ export default function ProductsScreen() {
         setShowLetterToast(true);
         setTimeout(() => {
           setShowLetterToast(false);
-        }, 800);
+        }, 300);
         
         // Cargar productos de la siguiente letra
         fetchProducts(false, false, '', nextLetter);
@@ -617,15 +617,11 @@ export default function ProductsScreen() {
     
     // Hacer scroll al primer resultado
     if (filtered.length > 0 && flatListRef.current) {
-      setTimeout(() => {
-        if (flatListRef.current) {
-          console.log('📍 Haciendo scroll al primer resultado');
-          flatListRef.current.scrollToOffset({
-            offset: 0,
-            animated: true,
-          });
-        }
-      }, 100);
+      console.log('📍 Haciendo scroll al primer resultado');
+      flatListRef.current.scrollToOffset({
+        offset: 0,
+        animated: false,
+      });
     }
   }, [allProducts, flatListRef]);
 
@@ -655,15 +651,11 @@ export default function ProductsScreen() {
       
       // Scroll al inicio
       if (flatListRef.current) {
-        setTimeout(() => {
-          if (flatListRef.current) {
-            console.log('📍 Scroll al inicio de la lista');
-            flatListRef.current.scrollToOffset({
-              offset: 0,
-              animated: true,
-            });
-          }
-        }, 100);
+        console.log('📍 Scroll al inicio de la lista');
+        flatListRef.current.scrollToOffset({
+          offset: 0,
+          animated: false,
+        });
       }
     }
   }, [searchTimeout, allProducts, flatListRef]);
@@ -687,24 +679,29 @@ export default function ProductsScreen() {
       setShowLetterToast(true);
       setTimeout(() => {
         setShowLetterToast(false);
-      }, 800);
+      }, 300);
       
       // Scroll a la posición
       try {
         flatListRef.current.scrollToIndex({
           index: index,
-          animated: true,
+          animated: false,
           viewPosition: 0, // Arriba de la pantalla
+          viewOffset: 0, // Compensar headers y dar espacio
         });
         console.log('✅ Scroll ejecutado correctamente');
       } catch (error) {
-        console.warn('⚠️ Error en scrollToIndex, usando scrollToOffset:', error);
-        // Fallback: calcular offset aproximado
-        const estimatedOffset = index * 100; // Altura estimada por item
-        flatListRef.current.scrollToOffset({
-          offset: estimatedOffset,
-          animated: true,
-        });
+        console.warn('⚠️ Error en scrollToIndex:', error);
+        // Fallback: Intentar sin viewOffset para altura variable
+        try {
+          flatListRef.current.scrollToIndex({
+            index: index,
+            animated: false,
+            viewPosition: 0,
+          });
+        } catch (fallbackError) {
+          console.error('❌ Fallback también falló:', fallbackError);
+        }
       }
     } else {
       console.warn('⚠️ No se puede hacer scroll:', {
@@ -744,14 +741,10 @@ export default function ProductsScreen() {
         
         // Scroll al inicio
         if (flatListRef.current) {
-          setTimeout(() => {
-            if (flatListRef.current) {
-              flatListRef.current.scrollToOffset({
-                offset: 0,
-                animated: true,
-              });
-            }
-          }, 100);
+          flatListRef.current.scrollToOffset({
+            offset: 0,
+            animated: false,
+          });
         }
       }
       return;
@@ -1793,32 +1786,32 @@ export default function ProductsScreen() {
           keyboardDismissMode="on-drag"
           onScroll={(event) => {
             const offset = event.nativeEvent.contentOffset.y;
-            const itemIndex = Math.round(offset / 194);
+            // No asumir altura fija ya que las cards son responsive
             // Solo logear cada 500ms para no saturar
             const now = Date.now();
             if (now - lastScrollLogRef.current > 500) {
-              console.log('👆 [SCROLL MANUAL] Offset actual:', Math.round(offset), '| Ítem aprox:', itemIndex);
+              console.log('👆 [SCROLL MANUAL] Offset actual:', Math.round(offset));
               lastScrollLogRef.current = now;
             }
           }}
           scrollEventThrottle={400}
+          // Usar altura promedio calculada por React Native (~221px)
+          // Necesario para scrollToIndex en listas largas
           getItemLayout={(data, index) => ({
-            length: 194, // Altura aproximada de cada item (del error: averageItemLength: 193.99)
-            offset: 194 * index,
+            length: 221, // Altura promedio basada en averageItemLength
+            offset: 221 * index,
             index,
           })}
           onScrollToIndexFailed={(info) => {
             console.warn('⚠️ scrollToIndex failed:', info);
             // Fallback: scroll usando offset calculado
             const offset = info.averageItemLength * info.index;
-            setTimeout(() => {
-              if (flatListRef.current) {
-                flatListRef.current.scrollToOffset({
-                  offset: offset,
-                  animated: true,
-                });
-              }
-            }, 100);
+            if (flatListRef.current) {
+              flatListRef.current.scrollToOffset({
+                offset: offset,
+                animated: false,
+              });
+            }
           }}
           removeClippedSubviews={false}
           maxToRenderPerBatch={20}
