@@ -1,5 +1,7 @@
 import { apiMiddleware } from '@/middleware/api';
 import { locationService } from '@/services/locationService';
+import { isDevelopmentMode, shouldBypassLocation, getTestLocation } from '@/config/dev.config';
+import { detectAuthError, formatAuthErrorMessage, AuthError } from '@/constants/authErrors';
 import { 
   LoginWithLocationCredentials, 
   AuthResponseWithLocation, 
@@ -10,7 +12,7 @@ import {
 
 class AuthService {
   private static instance: AuthService;
-  private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private refreshInterval: number = 120000; // 2 minutos para ser más ágil
   private onTokenRefreshCallback: ((token: string) => void) | null = null;
   private currentRefreshToken: string | null = null;
@@ -27,6 +29,12 @@ class AuthService {
   // Login con geolocalización usando la API real de KCH Digital
   async loginWithLocation(credentials: LoginWithLocationCredentials): Promise<AuthResponseWithLocation> {
     try {
+      console.log('[AUTH/LOGIN] Iniciando login con ubicación:', {
+        username: credentials.username,
+        latitude: credentials.latitude,
+        longitude: credentials.longitude
+      });
+
       const response = await apiMiddleware.post<KCHAuthResponse>('/api/token/', {
         username: credentials.username,
         password: credentials.password,
@@ -34,7 +42,15 @@ class AuthService {
         longitude: credentials.longitude,
       });
 
+      // Log completo de la respuesta para debugging
+      console.log('[AUTH/LOGIN] Respuesta del servidor:', JSON.stringify(response, null, 2));
+
       if (response.success && response.data) {
+        console.log('[AUTH/LOGIN] Login exitoso:', {
+          market: response.data.market_name,
+          login_time: response.data.login_time
+        });
+
         // Guardar tokens en el middleware (usar access token como bearer)
         apiMiddleware.setAuthToken(response.data.access);
         
@@ -61,55 +77,120 @@ class AuthService {
           message: `Inicio de sesión exitoso en ${response.data.market_name}`,
         };
       } else {
-        // Manejar errores específicos de la API
+        // Detectar y formatear error usando el nuevo sistema
         const errorData = response as any;
-        let errorMessage = 'Error al iniciar sesión';
+        const serverMessage = response.error || errorData.detail || (errorData.non_field_errors && errorData.non_field_errors[0]);
         
-        if (errorData.non_field_errors) {
-          errorMessage = errorData.non_field_errors[0] || errorMessage;
+        console.log('[AUTH/LOGIN] Error del servidor:', {
+          error: response.error,
+          statusCode: response.statusCode,
+          non_field_errors: errorData.non_field_errors,
+          detail: errorData.detail
+        });
+        
+        // Detectar tipo de error
+        const authError = detectAuthError(
+          response.statusCode,
+          serverMessage,
+          {
+            latitude: credentials.latitude,
+            longitude: credentials.longitude
+          }
+        );
+        
+        console.warn('[AUTH/LOGIN] Login failed:', {
+          code: authError.code,
+          title: authError.title,
+          statusCode: authError.statusCode
+        });
+        
+        // En modo desarrollo, mostrar información adicional
+        if (isDevelopmentMode()) {
+          console.log('[DEV] Error details:', authError.technicalDetails);
+          console.log('[DEV] Suggestions:', authError.suggestions);
         }
+        
+        // Formatear mensaje con sugerencias
+        const formattedMessage = formatAuthErrorMessage(authError, isDevelopmentMode());
         
         return {
           success: false,
-          message: errorMessage,
-        };
+          message: formattedMessage,
+          error: authError, // Incluir objeto de error completo para el frontend
+        } as any;
       }
     } catch (error: any) {
+      console.error('[AUTH/LOGIN] Excepción en login:', error);
+      
+      // Detectar error de red o excepción
+      const authError = detectAuthError(
+        undefined,
+        error.message || 'Error de conexión'
+      );
+      
+      const formattedMessage = formatAuthErrorMessage(authError, isDevelopmentMode());
+      
       return {
         success: false,
-        message: error.message || 'Error de conexión',
-      };
+        message: formattedMessage,
+        error: authError,
+      } as any;
     }
   }
   // Login automático con ubicación actual
   async login(username: string, password: string): Promise<AuthResponseWithLocation> {
     try {
-      console.log('AuthService: Iniciando login optimizado para', username);
+      console.log('[AUTH] Iniciando login optimizado para', username);
       
-      // Intentar obtener ubicación rápidamente
-      console.log('AuthService: Obteniendo ubicación rápida...');
-      
-      let location: any;
-      try {
-        // Usar método rápido de ubicación con timeout corto
-        location = await Promise.race([
-          locationService.getQuickLocation(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout de ubicación')), 2000)
-          )
-        ]);
-      } catch (locationError) {
-        console.warn('AuthService: Error o timeout de ubicación, usando ubicación por defecto');
-        // Usar ubicación por defecto (Madrid centro como ejemplo)
-        location = {
-          latitude: 40.4168,
-          longitude: -3.7038,
-          accuracy: 100,
-          timestamp: Date.now()
+      // Validaciones básicas
+      if (!username || username.length < 3) {
+        return {
+          success: false,
+          message: 'El nombre de usuario debe tener al menos 3 caracteres',
         };
       }
       
-      console.log('AuthService: Ubicación obtenida:', location);
+      if (!password || password.length < 4) {
+        return {
+          success: false,
+          message: 'La contraseña debe tener al menos 4 caracteres',
+        };
+      }
+      
+      // Intentar obtener ubicación rápidamente
+      console.log('[AUTH/LOCATION] Obteniendo ubicación GPS...');
+      
+      let location: any;
+      try {
+        // En modo desarrollo con bypass, usar ubicación de prueba
+        if (shouldBypassLocation()) {
+          location = {
+            ...getTestLocation(),
+            timestamp: Date.now()
+          };
+          console.log('[DEV] Using test location (bypass enabled):', location);
+        } else {
+          // Usar método rápido de ubicación con timeout corto
+          location = await Promise.race([
+            locationService.getQuickLocation(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout de ubicación')), 3000)
+            )
+          ]);
+          console.log('[AUTH/LOCATION] Ubicación GPS obtenida:', location);
+        }
+      } catch (locationError) {
+        console.warn('[AUTH/LOCATION] No se pudo obtener ubicación GPS, usando ubicación por defecto');
+        // Usar ubicación por defecto
+        location = {
+          ...getTestLocation(),
+          timestamp: Date.now()
+        };
+        
+        if (isDevelopmentMode()) {
+          console.log('[DEV] GPS failed, using default test location. Update config/dev.config.ts if needed.');
+        }
+      }
       
       // Hacer login con ubicación
       return await this.loginWithLocation({
@@ -119,7 +200,7 @@ class AuthService {
         longitude: location.longitude,
       });
     } catch (error: any) {
-      console.error('AuthService: Error en login:', error);
+      console.error('[AUTH] Error en login:', error);
       return {
         success: false,
         message: error.message || 'Error al hacer login',
@@ -134,18 +215,25 @@ class AuthService {
       clearInterval(this.refreshTimer);
     }
 
+    console.log(`[AUTH/REFRESH] Configurando refresh automático cada ${this.refreshInterval / 1000} segundos`);
+
     // Configurar nuevo timer
     this.refreshTimer = setInterval(async () => {
       try {
-        await this.refreshToken(refreshToken);
+        console.log('[AUTH/REFRESH] Ejecutando refresh automático del token...');
+        const result = await this.refreshToken(refreshToken);
+        
+        if (!result.success) {
+          console.error('[AUTH/REFRESH] Refresh automático falló, iniciando logout...');
+          // Si el refresh falla, hacer logout inmediato
+          await this.forceLogout('Sesión expirada. Por favor inicia sesión nuevamente.');
+        }
       } catch (error) {
-        console.error('Error en refresh automático:', error);
-        // En caso de error, intentar logout
-        this.logout();
+        console.error('[AUTH/REFRESH] Error en refresh automático:', error);
+        // En caso de error, hacer logout inmediato
+        await this.forceLogout('Error al refrescar la sesión. Por favor inicia sesión nuevamente.');
       }
     }, this.refreshInterval);
-
-    console.log(`Token refresh configurado cada ${this.refreshInterval / 1000} segundos`);
   }
 
   // Refresh del token con ubicación actual usando la API real de KCH Digital
@@ -153,11 +241,30 @@ class AuthService {
     try {
       const currentRefreshToken = refreshToken || this.currentRefreshToken;
       if (!currentRefreshToken) {
-        throw new Error('No hay refresh token disponible');
+        console.error('[AUTH/REFRESH] No hay refresh token disponible');
+        return {
+          success: false,
+          message: 'No hay sesión activa para refrescar',
+        };
       }
 
-      // Obtener ubicación actual
-      const coordinates = await locationService.getCurrentLocation();
+      console.log('[AUTH/REFRESH] Refrescando token...');
+
+      // Obtener ubicación actual con validación
+      let coordinates;
+      try {
+        coordinates = await locationService.getCurrentLocation();
+        console.log('[AUTH/REFRESH] Ubicación obtenida para refresh:', {
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude
+        });
+      } catch (locationError) {
+        console.error('[AUTH/REFRESH] Error obteniendo ubicación para refresh:', locationError);
+        return {
+          success: false,
+          message: 'No se pudo obtener tu ubicación. Verifica que los permisos GPS estén activados.',
+        };
+      }
       
       const refreshPayload: KCHRefreshPayload = {
         refresh: currentRefreshToken,
@@ -168,6 +275,11 @@ class AuthService {
       const response = await apiMiddleware.post<KCHAuthResponse>('/api/token/refresh/', refreshPayload);
 
       if (response.success && response.data) {
+        console.log('[AUTH/REFRESH] Token refrescado exitosamente:', {
+          market: response.data.market_name,
+          login_time: response.data.login_time
+        });
+
         // Actualizar access token en el middleware
         apiMiddleware.setAuthToken(response.data.access);
         
@@ -178,8 +290,6 @@ class AuthService {
         if (this.onTokenRefreshCallback) {
           this.onTokenRefreshCallback(response.data.access);
         }
-
-        console.log(`Token refrescado exitosamente para ${response.data.market_name}`);
         
         return {
           success: true,
@@ -194,18 +304,45 @@ class AuthService {
         const errorData = response as any;
         let errorMessage = 'Error al refrescar token';
         
+        // Validación específica de proximidad en refresh
         if (errorData.non_field_errors) {
-          errorMessage = errorData.non_field_errors[0] || errorMessage;
+          const errorText = errorData.non_field_errors[0] || '';
+          
+          if (errorText.includes('not near any market') || errorText.includes('Refresh denied')) {
+            errorMessage = 'Has salido del área del mercado. Debes estar a menos de 500 metros de un mercado registrado.';
+            console.warn('[AUTH/REFRESH] Usuario fuera del rango de proximidad en refresh');
+          } else if (errorText.includes('invalid') || errorText.includes('expired')) {
+            errorMessage = 'Sesión expirada. Por favor inicia sesión nuevamente.';
+            console.warn('[AUTH/REFRESH] Refresh token inválido o expirado');
+          } else {
+            errorMessage = errorText;
+          }
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
         }
         
-        throw new Error(errorMessage);
+        console.error('[AUTH/REFRESH] Error en refresh:', errorMessage);
+        
+        return {
+          success: false,
+          message: errorMessage,
+        };
       }
 
     } catch (error: any) {
-      console.error('Error refreshing token:', error);
+      console.error('[AUTH/REFRESH] Excepción en refresh token:', error);
+      
+      let errorMessage = 'Error al refrescar token';
+      
+      if (error.message?.includes('Network')) {
+        errorMessage = 'Error de red. Verifica tu conexión a internet.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return {
         success: false,
-        message: error.message || 'Error al refrescar token',
+        message: errorMessage,
       };
     }
   }
@@ -218,6 +355,8 @@ class AuthService {
   // Logout del usuario
   async logout(): Promise<void> {
     try {
+      console.log('[AUTH/LOGOUT] Iniciando logout...');
+
       // Detener refresh timer
       if (this.refreshTimer) {
         clearInterval(this.refreshTimer);
@@ -235,14 +374,47 @@ class AuthService {
           timestamp: Date.now(),
         }, true);
       }
+
+      console.log('[AUTH/LOGOUT] Logout exitoso');
     } catch (error) {
       // Continuar con logout local aunque falle el servidor
-      console.warn('Error al hacer logout en servidor:', error);
+      console.warn('[AUTH/LOGOUT] Error al hacer logout en servidor:', error);
     } finally {
       // Limpiar token local
       apiMiddleware.clearAuthToken();
+      this.currentRefreshToken = null;
       this.onTokenRefreshCallback = null;
     }
+  }
+
+  // Logout forzado (para cuando falla el refresh automático)
+  async forceLogout(reason?: string): Promise<void> {
+    console.error('[AUTH/LOGOUT] Logout forzado -', reason || 'Sesión inválida');
+
+    // Notificar al callback antes de limpiar
+    if (this.onTokenRefreshCallback) {
+      try {
+        this.onTokenRefreshCallback('');
+      } catch (e) {
+        console.warn('Error notificando callback:', e);
+      }
+    }
+
+    // Detener refresh timer inmediatamente
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+
+    // Detener monitoreo de ubicación
+    locationService.stopWatching();
+
+    // Limpiar todo sin intentar llamar al servidor
+    apiMiddleware.clearAuthToken();
+    this.currentRefreshToken = null;
+    this.onTokenRefreshCallback = null;
+
+    console.log('[AUTH/LOGOUT] Logout forzado completado');
   }
 
   // Verificar si el token está activo
@@ -298,9 +470,8 @@ class AuthService {
         return {
           success: true,
           user: response.data.user,
-          bearer_token: response.data.bearer_token,
-          expires_in: response.data.expires_in,
-          refresh_interval: response.data.refresh_interval,
+          access: response.data.bearer_token,
+          refresh: response.data.bearer_token,
           message: 'Token válido',
         };
       } else {

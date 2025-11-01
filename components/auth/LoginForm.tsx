@@ -11,6 +11,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { LoginCredentials } from '@/types/auth';
 import FruitPreloader from '@/components/ui/FruitPreloader';
+import { AuthError } from '@/constants/authErrors';
 
 const { width, height } = Dimensions.get('window');
 
@@ -41,15 +42,26 @@ export default function LoginForm({
       return;
     }
 
-    console.log('🔐 Iniciando login para usuario:', username);
+    console.log('[LOGIN] Iniciando login para usuario:', username);
     const result = await login(username, password);
 
     if (result.success) {
-      console.log('✅ Login exitoso:', result.message);
+      console.log('[LOGIN] Login exitoso:', result.message);
       onLoginSuccess?.();
     } else {
-      console.log('❌ Error en login:', result.message);
-      Alert.alert("Error", result.message || "Error al iniciar sesión");
+      console.log('[LOGIN] Error en login:', result.message);
+      
+      // Usar el objeto AuthError si está disponible
+      const authError = result.error as AuthError | undefined;
+      const errorTitle = authError?.title || "Error de inicio de sesión";
+      const errorMessage = result.message || "Error al iniciar sesión";
+      
+      Alert.alert(
+        errorTitle,
+        errorMessage,
+        [{ text: 'Entendido', style: 'default' }],
+        { cancelable: true }
+      );
     }
   };
 

@@ -95,30 +95,41 @@ class ApiMiddleware {
           statusCode: response.status,
         };
       } else {
-        // Manejar errores específicos
-        let errorMessage = data.message || 'Error desconocido';
+        // Manejar errores específicos - PRESERVAR datos completos del servidor
+        let errorMessage = data.message || data.detail || 'Error desconocido';
         
-        switch (response.status) {
-          case 401:
-            errorMessage = 'No autorizado. Por favor inicia sesión nuevamente.';
-            TokenStorage.clearToken();
-            break;
-          case 403:
-            errorMessage = 'Acceso denegado.';
-            break;
-          case 404:
-            errorMessage = 'Recurso no encontrado.';
-            break;
-          case 500:
-            errorMessage = 'Error interno del servidor.';
-            break;
+        // Si hay non_field_errors (formato Django REST Framework), usar el primero
+        if (data.non_field_errors && Array.isArray(data.non_field_errors)) {
+          errorMessage = data.non_field_errors[0] || errorMessage;
+        }
+        
+        // Mensajes por código de estado (solo si no hay mensaje específico)
+        if (!data.detail && !data.non_field_errors && !data.message) {
+          switch (response.status) {
+            case 401:
+              errorMessage = 'No autorizado. Por favor inicia sesión nuevamente.';
+              TokenStorage.clearToken();
+              break;
+            case 403:
+              errorMessage = 'Acceso denegado.';
+              break;
+            case 404:
+              errorMessage = 'Recurso no encontrado.';
+              break;
+            case 500:
+              errorMessage = 'Error interno del servidor.';
+              break;
+          }
         }
 
+        // Retornar respuesta con error, INCLUYENDO datos completos
         return {
           success: false,
           error: errorMessage,
           statusCode: response.status,
-        };
+          // Preservar datos completos del error para análisis posterior
+          ...data,
+        } as any;
       }
     } catch (error) {
       return {

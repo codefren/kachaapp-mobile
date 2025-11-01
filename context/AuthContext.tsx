@@ -86,7 +86,7 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
       };
     
     case 'SHOW_LOCATION_MODAL':
-      console.log('🔄 AuthContext: SHOW_LOCATION_MODAL ejecutado');
+      console.log('[AUTH] SHOW_LOCATION_MODAL ejecutado');
       return {
         ...state,
         showLocationModal: true,
@@ -95,7 +95,7 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
       };
     
     case 'CONFIRM_LOCATION':
-      console.log('🔄 AuthContext: CONFIRM_LOCATION ejecutado');
+      console.log('[AUTH] CONFIRM_LOCATION ejecutado');
       if (!state.pendingLoginData) {
         return state;
       }
@@ -114,7 +114,7 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
       };
     
     case 'CANCEL_LOCATION_MODAL':
-      console.log('🔄 AuthContext: CANCEL_LOCATION_MODAL ejecutado');
+      console.log('[AUTH] CANCEL_LOCATION_MODAL ejecutado');
       return {
         ...state,
         showLocationModal: false,
@@ -123,7 +123,7 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
       };
     
     case 'LOGIN_SUCCESS':
-      console.log('🔄 AuthContext: LOGIN_SUCCESS ejecutado');
+      console.log('[AUTH] LOGIN_SUCCESS ejecutado');
       return {
         ...state,
         user: action.payload.user,
@@ -197,7 +197,7 @@ interface AuthContextType {
   state: AuthStateWithLocation;
   
   // Acciones de autenticación
-  login: (username: string, password: string) => Promise<{ success: boolean; message?: string }>;
+  login: (username: string, password: string) => Promise<{ success: boolean; message?: string; error?: any }>;
   logout: () => Promise<void>;
   verifyToken: () => Promise<void>;
   
@@ -221,7 +221,7 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
-  console.log('🔄 AuthProvider: Estado actual:', {
+  console.log('[AUTH] Estado actual:', {
     isAuthenticated: state.isAuthenticated,
     hasToken: !!state.accessToken,
     tokenLength: state.accessToken?.length || 0,
@@ -231,9 +231,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // No verificar token al inicializar para acelerar el login
 
-  // Configurar callback para refresh de token
+  // Configurar callback para refresh de token y logout automático
   useEffect(() => {
     authService.setTokenRefreshCallback((newAccessToken: string) => {
+      // Si el token está vacío, significa que hubo un logout forzado
+      if (!newAccessToken || newAccessToken === '') {
+        console.error('[AUTH] Token inválido recibido, ejecutando logout automático');
+        dispatch({ type: 'LOGOUT' });
+        // Mostrar alerta al usuario
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            alert('⚠️ Sesión expirada. Por favor inicia sesión nuevamente.');
+          }, 100);
+        }
+        return;
+      }
+
+      // Token válido, actualizar
       dispatch({
         type: 'TOKEN_REFRESHED',
         payload: { 
@@ -245,13 +259,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [state.refreshToken]);
 
   // Función para login con geolocalización
-  const login = async (username: string, password: string): Promise<{ success: boolean; message?: string }> => {
-    console.log('🔐 AuthContext: Iniciando login para', username);
+  const login = async (username: string, password: string): Promise<{ success: boolean; message?: string; error?: any }> => {
+    console.log('[AUTH] Iniciando login para', username);
     dispatch({ type: 'SET_LOADING', payload: true });
 
     try {
       const response = await authService.login(username, password);
-      console.log('📡 AuthContext: Respuesta del servicio:', response);
+      console.log('[AUTH] Respuesta del servicio:', response);
 
       if (response.success && response.user && response.access) {
         const userWithLocation: UserWithLocation = {
@@ -262,7 +276,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           login_time: response.user.login_time,
         };
 
-        console.log('✅ AuthContext: Login exitoso, confirmando ubicación automáticamente');
+        console.log('[AUTH] Login exitoso, confirmando ubicación automáticamente');
         dispatch({
           type: 'LOGIN_SUCCESS',
           payload: {
@@ -284,32 +298,37 @@ export function AuthProvider({ children }: AuthProviderProps) {
           message: response.message,
         };
       } else {
-        console.log('❌ AuthContext: Login fallido');
+        console.log('[AUTH] Login fallido -', response.message);
         dispatch({ type: 'LOGIN_FAILURE' });
+        
+        // Pasar el objeto error completo del authService
         return {
           success: false,
           message: response.message || 'Error al iniciar sesión',
+          error: (response as any).error, // Pasar el objeto AuthError completo
         };
       }
     } catch (error: any) {
-      console.log('💥 AuthContext: Error en login:', error);
+      console.log('[AUTH] Error en login:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
       return {
         success: false,
-        message: error.message || 'Error de conexión',
+        message: error.message || 'Error de conexión. Verifica tu internet.',
+        error: error,
       };
     }
   };
 
   // Función para logout
   const logout = async (): Promise<void> => {
+    console.log('[AUTH] Iniciando logout...');
     dispatch({ type: 'SET_LOADING', payload: true });
 
     try {
       await authService.logout();
       stopLocationTracking();
     } catch (error) {
-      console.warn('Error durante logout:', error);
+      console.warn('[AUTH] Error durante logout:', error);
     } finally {
       dispatch({ type: 'LOGOUT' });
     }
@@ -317,12 +336,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Función para verificar token
   const verifyToken = async (): Promise<void> => {
-    console.log('🔍 AuthContext: Verificando token existente');
+    console.log('[AUTH] Verificando token existente');
     dispatch({ type: 'SET_LOADING', payload: true });
 
     try {
       const response = await authService.verifyToken();
-      console.log('📡 AuthContext: Respuesta de verificación:', response);
+      console.log('[AUTH] Respuesta de verificación:', response);
 
       if (response.success && response.user && response.access) {
         const userWithLocation: UserWithLocation = {
@@ -333,7 +352,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           login_time: response.user.login_time,
         };
 
-        console.log('✅ AuthContext: Token válido, restaurando sesión');
+        console.log('[AUTH] Token válido, restaurando sesión');
         dispatch({
           type: 'LOGIN_SUCCESS',
           payload: {
@@ -348,11 +367,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Iniciar monitoreo de ubicación
         startLocationTracking();
       } else {
-        console.log('❌ AuthContext: Token inválido');
+        console.log('[AUTH] Token inválido');
         dispatch({ type: 'LOGIN_FAILURE' });
       }
     } catch (error) {
-      console.log('💥 AuthContext: Error verificando token:', error);
+      console.log('[AUTH] Error verificando token:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
     }
   };
