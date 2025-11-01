@@ -37,6 +37,21 @@ export default function MapLayer({
 }: MapLayerProps) {
   const [mapLoading, setMapLoading] = useState(true);
   const [showPreloader, setShowPreloader] = useState(true);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  // Validar coordenadas
+  const isValidCoordinate = (lat: number, lng: number): boolean => {
+    return (
+      typeof lat === 'number' &&
+      typeof lng === 'number' &&
+      !isNaN(lat) &&
+      !isNaN(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180
+    );
+  };
 
   const formatCoordinates = (lat: number, lng: number) => {
     return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
@@ -61,6 +76,21 @@ export default function MapLayer({
   };
 
   const renderMap = () => {
+    // Validar coordenadas antes de renderizar
+    if (!isValidCoordinate(latitude, longitude)) {
+      console.error('❌ Coordenadas inválidas en MapLayer:', { latitude, longitude });
+      return (
+        <View style={styles.fallbackContainer}>
+          <Text style={styles.fallbackTitle}>❌ Error de Ubicación</Text>
+          <View style={styles.locationCard}>
+            <Text style={styles.errorText}>Las coordenadas recibidas no son válidas</Text>
+            <Text style={styles.locationText}>Lat: {latitude}</Text>
+            <Text style={styles.locationText}>Lng: {longitude}</Text>
+          </View>
+        </View>
+      );
+    }
+
     const coordinates = formatCoordinates(latitude, longitude);
     const description = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}\nPrecisión: ${getLocationAccuracy()}`;
 
@@ -72,7 +102,7 @@ export default function MapLayer({
           showProgress={false}
           minDuration={3000}
           onComplete={() => {
-            // console.log('✨ Preloader completado, mostrando mapa');
+            console.log('✨ Preloader completado, mostrando mapa');
             setShowPreloader(false);
             setMapLoading(false);
           }}
@@ -80,30 +110,40 @@ export default function MapLayer({
       );
     }
 
-    // Importar el componente correcto según la plataforma
-    // Metro bundler automáticamente elegirá la versión correcta (.web.tsx o .native.tsx)
-    const NativeMapView = require('@/components/map/NativeMapView').default;
-    
-    return (
-      <NativeMapView
-        latitude={latitude}
-        longitude={longitude}
-        loading={false}
-        title={marketName || "Tu ubicación actual"}
-        description={description}
-        loginTime={loginTime}
-        onMapReady={() => {
-          console.log('Mapa cargado correctamente');
-          setMapLoading(false);
-        }}
-        onRegionChange={(region: any) => {
-          console.log('Región del mapa cambió:', region);
-        }}
-        onUserLocationChange={(event: any) => {
-          console.log('Ubicación del usuario cambió:', event.nativeEvent);
-        }}
-      />
-    );
+    // Si hubo un error al cargar el mapa, mostrar fallback
+    if (mapError) {
+      return renderFallbackMap();
+    }
+
+    try {
+      // Importar el componente correcto según la plataforma
+      const NativeMapView = require('@/components/map/NativeMapView').default;
+      
+      return (
+        <NativeMapView
+          latitude={latitude}
+          longitude={longitude}
+          loading={false}
+          title={marketName || "Tu ubicación actual"}
+          description={description}
+          loginTime={loginTime}
+          onMapReady={() => {
+            console.log('✅ Mapa cargado correctamente');
+            setMapLoading(false);
+          }}
+          onRegionChange={(region: any) => {
+            console.log('🗺️ Región del mapa cambió:', region);
+          }}
+          onUserLocationChange={(event: any) => {
+            console.log('📍 Ubicación del usuario cambió');
+          }}
+        />
+      );
+    } catch (error) {
+      console.error('❌ Error al renderizar el mapa:', error);
+      setMapError(error instanceof Error ? error.message : 'Error desconocido');
+      return renderFallbackMap();
+    }
   };
 
   const renderFallbackMap = () => {
@@ -196,6 +236,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#dc2626',
+    textAlign: 'center',
+    marginBottom: 8,
+    fontWeight: '600',
   },
   openExternalButton: {
     backgroundColor: '#059669',

@@ -32,7 +32,8 @@ export default function NativeMapView({
     }
   }, [onMapReady]);
 
-  const mapUrl = `https://www.google.com/maps/embed/v1/view?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dOWTgHz-y931Pk&center=${latitude},${longitude}&zoom=15&maptype=roadmap`;
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBFw0Qbyq9zTFTd-tUY6dOWTgHz-y931Pk';
+  const mapUrl = `https://www.google.com/maps/embed/v1/view?key=${apiKey}&center=${latitude},${longitude}&zoom=15&maptype=roadmap`;
   
   return (
     <View style={styles.mapContainer}>

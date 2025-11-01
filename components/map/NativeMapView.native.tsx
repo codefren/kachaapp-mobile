@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 const { width, height } = Dimensions.get('window');
 
 interface NativeMapViewProps {
@@ -25,6 +25,50 @@ export default function NativeMapView({
   loginTime,
   loading = false,
 }: NativeMapViewProps) {
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  // Validar coordenadas
+  const isValidCoordinate = (lat: number, lng: number): boolean => {
+    return (
+      typeof lat === 'number' &&
+      typeof lng === 'number' &&
+      !isNaN(lat) &&
+      !isNaN(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180
+    );
+  };
+
+  useEffect(() => {
+    if (!isValidCoordinate(latitude, longitude)) {
+      console.error('❌ Coordenadas inválidas:', { latitude, longitude });
+      setMapError('Coordenadas inválidas');
+    } else {
+      console.log('✅ Coordenadas válidas:', { latitude, longitude });
+    }
+  }, [latitude, longitude]);
+
+  if (!isValidCoordinate(latitude, longitude)) {
+    return (
+      <View style={[styles.mapContainer, styles.errorContainer]}>
+        <Text style={styles.errorText}>❌ Error: Coordenadas inválidas</Text>
+        <Text style={styles.errorDetails}>Lat: {latitude}, Lng: {longitude}</Text>
+      </View>
+    );
+  }
+
+  if (mapError) {
+    return (
+      <View style={[styles.mapContainer, styles.errorContainer]}>
+        <Text style={styles.errorText}>❌ Error al cargar el mapa</Text>
+        <Text style={styles.errorDetails}>{mapError}</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.mapContainer}>
       {/* Panel de información estilo Google Maps */}
@@ -43,13 +87,13 @@ export default function NativeMapView({
         </View>
       )}
       <MapView
+        provider={PROVIDER_GOOGLE}
         style={styles.map}
-        initialCamera={{
-          center: { latitude, longitude },
-          pitch: 60, // Inclinación de 60 grados
-          heading: 0,
-          altitude: 400,
-          zoom: 19,
+        initialRegion={{
+          latitude: latitude,
+          longitude: longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
         }}
         pitchEnabled={true}
         rotateEnabled={true}
@@ -58,21 +102,28 @@ export default function NativeMapView({
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
-        followsUserLocation={true}
-        userLocationUpdateInterval={2000}
+        followsUserLocation={false}
         mapType="standard"
         loadingEnabled={true}
         loadingIndicatorColor="#3b82f6"
         loadingBackgroundColor="#f8fafc"
-        onMapReady={onMapReady}
+        onMapReady={() => {
+          console.log('✅ Mapa nativo listo');
+          setIsReady(true);
+          onMapReady?.();
+        }}
         onUserLocationChange={(event) => {
-          // Reducir logs de ubicación para evitar spam
-          if (Math.random() < 0.1) { // Solo log 10% de las veces
-            console.log('Ubicación del usuario actualizada');
+          if (Math.random() < 0.1) {
+            console.log('📍 Ubicación actualizada');
           }
           onUserLocationChange?.(event);
         }}
       >
+        <Marker
+          coordinate={{ latitude, longitude }}
+          title={title}
+          description={loginTime ? `Login: ${loginTime}` : undefined}
+        />
       </MapView>
     </View>
   );
@@ -137,5 +188,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6b7280',
     fontWeight: '500',
+  },
+  errorContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#dc2626',
+    marginBottom: 8,
+  },
+  errorDetails: {
+    fontSize: 14,
+    color: '#991b1b',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
 });

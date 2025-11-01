@@ -32,7 +32,12 @@
         "WRITE_EXTERNAL_STORAGE",
         "READ_MEDIA_IMAGES"
       ],
-      "package": "com.efrenoscar.kchdigitalfrontend"
+      "package": "com.efrenoscar.kchdigitalfrontend",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBVmnii27BvxepqPZXSAkq5IsyV6icNVIw"
+        }
+      }
     },
     "web": {
       "bundler": "metro",
