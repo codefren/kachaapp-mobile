@@ -1,6 +1,5 @@
 import { apiMiddleware } from '@/middleware/api';
 import { locationService } from '@/services/locationService';
-import { isDevelopmentMode, shouldBypassLocation, getTestLocation } from '@/config/dev.config';
 import { detectAuthError, formatAuthErrorMessage, AuthError } from '@/constants/authErrors';
 import { 
   LoginWithLocationCredentials, 
@@ -104,14 +103,8 @@ class AuthService {
           statusCode: authError.statusCode
         });
         
-        // En modo desarrollo, mostrar información adicional
-        if (isDevelopmentMode()) {
-          console.log('[DEV] Error details:', authError.technicalDetails);
-          console.log('[DEV] Suggestions:', authError.suggestions);
-        }
-        
         // Formatear mensaje con sugerencias
-        const formattedMessage = formatAuthErrorMessage(authError, isDevelopmentMode());
+        const formattedMessage = formatAuthErrorMessage(authError, false);
         
         return {
           success: false,
@@ -128,7 +121,7 @@ class AuthService {
         error.message || 'Error de conexión'
       );
       
-      const formattedMessage = formatAuthErrorMessage(authError, isDevelopmentMode());
+      const formattedMessage = formatAuthErrorMessage(authError, false);
       
       return {
         success: false,
@@ -162,34 +155,20 @@ class AuthService {
       
       let location: any;
       try {
-        // En modo desarrollo con bypass, usar ubicación de prueba
-        if (shouldBypassLocation()) {
-          location = {
-            ...getTestLocation(),
-            timestamp: Date.now()
-          };
-          console.log('[DEV] Using test location (bypass enabled):', location);
-        } else {
-          // Usar método rápido de ubicación con timeout corto
-          location = await Promise.race([
-            locationService.getQuickLocation(),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout de ubicación')), 3000)
-            )
-          ]);
-          console.log('[AUTH/LOCATION] Ubicación GPS obtenida:', location);
-        }
+        // Obtener ubicación GPS con timeout
+        location = await Promise.race([
+          locationService.getQuickLocation(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout de ubicación')), 5000)
+          )
+        ]);
+        console.log('[AUTH/LOCATION] Ubicación GPS obtenida:', location);
       } catch (locationError) {
-        console.warn('[AUTH/LOCATION] No se pudo obtener ubicación GPS, usando ubicación por defecto');
-        // Usar ubicación por defecto
-        location = {
-          ...getTestLocation(),
-          timestamp: Date.now()
+        console.error('[AUTH/LOCATION] No se pudo obtener ubicación GPS');
+        return {
+          success: false,
+          message: 'No se pudo obtener tu ubicación. Verifica que el GPS esté activado y los permisos estén otorgados.',
         };
-        
-        if (isDevelopmentMode()) {
-          console.log('[DEV] GPS failed, using default test location. Update config/dev.config.ts if needed.');
-        }
       }
       
       // Hacer login con ubicación

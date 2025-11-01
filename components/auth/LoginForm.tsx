@@ -1,17 +1,17 @@
-import React, { useState } from "react";
-import { 
-  Pressable, 
-  Text, 
-  View, 
-  TextInput, 
-  Alert,
-  StyleSheet,
-  Dimensions
-} from "react-native";
-import { useAuth } from '@/context/AuthContext';
-import { LoginCredentials } from '@/types/auth';
 import FruitPreloader from '@/components/ui/FruitPreloader';
 import { AuthError } from '@/constants/authErrors';
+import { useAuth } from '@/context/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from "react-native";
 
 const { width, height } = Dimensions.get('window');
 
@@ -28,6 +28,7 @@ export default function LoginForm({
 }: LoginFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { state, login } = useAuth();
 
   const handleLogin = async () => {
@@ -123,11 +124,11 @@ export default function LoginForm({
           
           {/* Username Field */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Usuario</Text>
+            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Usuario</Text>
             <TextInput
               value={username}
               onChangeText={setUsername}
-              placeholder="nombre_usuario"
+              placeholder="Usuario"
               placeholderTextColor="#64748b"
               autoCapitalize="none"
               autoComplete="username"
@@ -141,13 +142,34 @@ export default function LoginForm({
 
           {/* Password Field */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Contraseña</Text>
+            <View style={styles.passwordLabelRow}>
+              <Text style={styles.inputLabel}>Contraseña</Text>
+              <Pressable
+                onPress={() => setShowPassword(!showPassword)}
+                disabled={state.isLoading}
+                style={styles.showPasswordButton}
+              >
+                <View style={styles.showPasswordContent}>
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={18}
+                    color={state.isLoading ? "#94a3b8" : "#2563eb"}
+                  />
+                  <Text style={[
+                    styles.showPasswordText,
+                    state.isLoading && styles.textDisabled
+                  ]}>
+                    {showPassword ? 'Ocultar' : 'Mostrar'}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
             <TextInput
               value={password}
               onChangeText={setPassword}
               placeholder="••••••••"
               placeholderTextColor="#64748b"
-              secureTextEntry
+              secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="password"
               editable={!state.isLoading}
@@ -262,11 +284,30 @@ const styles = StyleSheet.create({
   inputGroup: {
     marginBottom: 20,
   },
+  passwordLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#374151', // slate-700
-    marginBottom: 8,
+  },
+  showPasswordButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  showPasswordContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  showPasswordText: {
+    fontSize: 13,
+    color: '#2563eb', // blue-600
+    fontWeight: '500',
   },
   textInput: {
     width: '100%',
