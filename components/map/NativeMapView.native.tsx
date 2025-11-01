@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 const { width, height } = Dimensions.get('window');
@@ -27,6 +27,8 @@ export default function NativeMapView({
 }: NativeMapViewProps) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const mapRef = useRef<MapView>(null);
+  const centeringTimeoutRef = useRef<number | null>(null);
 
   // Validar coordenadas
   const isValidCoordinate = (lat: number, lng: number): boolean => {
@@ -50,6 +52,46 @@ export default function NativeMapView({
       console.log('✅ Coordenadas válidas:', { latitude, longitude });
     }
   }, [latitude, longitude]);
+
+  // Función para centrar el mapa
+  const centerMap = () => {
+    if (mapRef.current && isValidCoordinate(latitude, longitude)) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: latitude,
+          longitude: longitude,
+        },
+        pitch: 60,
+        heading: 0,
+        altitude: 200,
+        zoom: 18,
+      }, { duration: 800 });
+    }
+  };
+
+  // Actualizar la cámara cuando cambien las coordenadas
+  useEffect(() => {
+    if (isReady && isValidCoordinate(latitude, longitude)) {
+      console.log('🎬 Actualizando cámara a nueva ubicación:', { latitude, longitude });
+      centerMap();
+    }
+  }, [latitude, longitude, isReady]);
+
+  // Re-centrar cuando el usuario deje de mover el mapa
+  const handleRegionChangeComplete = (region: any) => {
+    // Limpiar timeout anterior si existe
+    if (centeringTimeoutRef.current) {
+      clearTimeout(centeringTimeoutRef.current);
+    }
+    
+    // Volver a centrar después de 1 segundo de inactividad
+    centeringTimeoutRef.current = setTimeout(() => {
+      console.log('🎯 Re-centrando mapa automáticamente');
+      centerMap();
+    }, 1000);
+    
+    onRegionChange?.(region);
+  };
 
   if (!isValidCoordinate(latitude, longitude)) {
     return (
@@ -87,22 +129,33 @@ export default function NativeMapView({
         </View>
       )}
       <MapView
+        ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={{
           latitude: latitude,
           longitude: longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
+          latitudeDelta: 0.0015,
+          longitudeDelta: 0.0015,
+        }}
+        camera={{
+          center: {
+            latitude: latitude,
+            longitude: longitude,
+          },
+          pitch: 60,
+          heading: 0,
+          altitude: 200,
+          zoom: 18,
         }}
         pitchEnabled={true}
         rotateEnabled={true}
         zoomEnabled={true}
         scrollEnabled={true}
         showsUserLocation={true}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        followsUserLocation={false}
+        showsMyLocationButton={true}
+        showsCompass={true}
+        followsUserLocation={true}
         mapType="standard"
         loadingEnabled={true}
         loadingIndicatorColor="#3b82f6"
@@ -112,6 +165,7 @@ export default function NativeMapView({
           setIsReady(true);
           onMapReady?.();
         }}
+        onRegionChangeComplete={handleRegionChangeComplete}
         onUserLocationChange={(event) => {
           if (Math.random() < 0.1) {
             console.log('📍 Ubicación actualizada');
