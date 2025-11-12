@@ -1,8 +1,7 @@
 {
   "expo": {
-    "owner": "efrenoscar",
-    "slug": "kch-digital-frontend",
     "name": "kch-digital-frontend",
+    "slug": "kch-digital-frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -36,7 +35,7 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.efrenoscar.kchdigitalfrontend",
+      "package": "com.kachadigital.kachaapp",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyBVmnii27BvxepqPZXSAkq5IsyV6icNVIw"
