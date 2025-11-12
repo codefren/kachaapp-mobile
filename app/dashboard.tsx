@@ -1,11 +1,12 @@
 import MapLayer from '@/components/map/MapLayer';
-import FruitPreloader from '@/components/ui/FruitPreloader';
 import BottomMenu from '@/components/navigation/BottomMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   PanResponder,
@@ -25,6 +26,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const [slideAnim] = useState(new Animated.Value(0));
   const [showDashboard, setShowDashboard] = useState(false);
+  const [isLoadingDashboardState, setIsLoadingDashboardState] = useState(true);
   
   // Datos simulados del dashboard
   const [dashboardData] = useState({
@@ -48,9 +50,28 @@ export default function DashboardScreen() {
       hasLocation: !!state.lastLocation,
       marketName: state.marketName,
       loginTime: state.loginTime,
-      user: state.user?.username
+      user: state.user?.username,
+      showDashboard
     });
-  }, [state.isAuthenticated, state.lastLocation, state.marketName, state.loginTime, state.user]);
+  }, [state.isAuthenticated, state.lastLocation, state.marketName, state.loginTime, state.user, showDashboard]);
+
+  // Restaurar estado de dashboard desde AsyncStorage
+  useEffect(() => {
+    const loadDashboardState = async () => {
+      try {
+        const savedState = await AsyncStorage.getItem('dashboard_confirmed');
+        if (savedState === 'true') {
+          console.log('📊 Dashboard: Ubicación ya confirmada previamente');
+          setShowDashboard(true);
+        }
+      } catch (error) {
+        console.error('📊 Error cargando estado del dashboard:', error);
+      } finally {
+        setIsLoadingDashboardState(false);
+      }
+    };
+    loadDashboardState();
+  }, []);
 
   // Obtener ubicación automáticamente al iniciar
   useEffect(() => {
@@ -68,9 +89,16 @@ export default function DashboardScreen() {
     }
   }, [state.isAuthenticated, state.lastLocation]);
 
-  const handleSlideComplete = () => {
+  const handleSlideComplete = async () => {
     console.log('✅ Ubicación confirmada');
     setShowDashboard(true);
+    // Guardar confirmación en AsyncStorage
+    try {
+      await AsyncStorage.setItem('dashboard_confirmed', 'true');
+      console.log('📊 Dashboard confirmado guardado en AsyncStorage');
+    } catch (error) {
+      console.error('📊 Error guardando confirmación:', error);
+    }
   };
 
   const panResponder = PanResponder.create({
@@ -115,13 +143,27 @@ export default function DashboardScreen() {
     );
   }
 
+  // Mostrar indicador mientras carga el estado del dashboard
+  if (isLoadingDashboardState) {
+    return (
+      <View style={styles.loadingContainer}>
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color="#10b981" />
+        </View>
+      </View>
+    );
+  }
+
+  // Mostrar indicador sutil mientras se obtiene ubicación
   if (!state.lastLocation) {
     return (
-      <FruitPreloader 
-        message="Obteniendo tu ubicación..."
-        showProgress={true}
-        minDuration={3000}
-      />
+      <View style={styles.loadingContainer}>
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Obteniendo tu ubicación...</Text>
+          <Text style={styles.loadingSubtext}>Esto solo tomará unos segundos</Text>
+        </View>
+      </View>
     );
   }
 
@@ -914,6 +956,39 @@ const styles = StyleSheet.create({
   menuLabelActive: {
     color: '#10b981',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
+  },
+  // Estilos para indicador de carga de ubicación
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  loadingCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 40,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
+    minWidth: 280,
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

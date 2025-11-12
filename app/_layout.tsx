@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -6,6 +7,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/context/AuthContext';
+import NavigationPersistence from '@/components/navigation/NavigationPersistence';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -14,10 +16,21 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  // Log para detectar si RootLayout se remonta
+  useEffect(() => {
+    console.log('[LAYOUT] 🔶 RootLayout montado');
+    return () => {
+      console.log('[LAYOUT] 🔴 RootLayout desmontado');
+    };
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          {/* Persistencia de navegación */}
+          <NavigationPersistence />
+          
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: true }} />

@@ -1,21 +1,29 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { 
   KeyboardAvoidingView, 
   Platform,
   ScrollView,
-  StyleSheet,
-  View,
-  Text
+  StyleSheet
 } from "react-native";
-import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
 import LoginForm from '@/components/auth/LoginForm';
 import DashboardScreen from './dashboard';
 import FruitPreloader from '@/components/ui/FruitPreloader';
 
 // Componente principal que maneja la navegación condicional
-function AppContent() {
+// AuthProvider ya está en _layout.tsx, no duplicar aquí
+export default function Index() {
   const { state } = useAuth();
 
+  // Log para detectar si el componente Index se remonta
+  useEffect(() => {
+    console.log('[INDEX] 🔶 Index montado - isInitialized:', state.isInitialized);
+    return () => {
+      console.log('[INDEX] 🔴 Index desmontado');
+    };
+  }, []);
+
+  // Handlers para LoginForm (placeholders para futuras funcionalidades)
   const handleLoginSuccess = () => {
     console.log('🎉 Login exitoso - navegando al dashboard/mapa');
   };
@@ -28,25 +36,27 @@ function AppContent() {
     console.log('📝 Navegar a registro');
   };
 
-  // Mostrar preloader mejorado mientras se verifica el token
-  if (state.isLoading && !state.isAuthenticated) {
+  // Mostrar preloader SOLO durante la inicialización inicial de la app
+  // NO mostrarlo cada vez que isLoading sea true (login, refresh, etc.)
+  if (!state.isInitialized) {
+    console.log('[INDEX] ⏳ Mostrando preloader - isInitialized:', state.isInitialized);
     return (
       <FruitPreloader 
-        message="Verificando sesión..." 
+        message="Iniciando..." 
         showProgress={false}
-        minDuration={2000}
+        minDuration={1500}
       />
     );
   }
 
   // Si está autenticado, mostrar dashboard
   if (state.isAuthenticated) {
-    console.log('🏠 Usuario autenticado, mostrando dashboard');
+    console.log('[INDEX] 🏠 Usuario autenticado, mostrando dashboard');
     return <DashboardScreen />;
   }
 
   // Si no está autenticado, mostrar login
-  console.log('🔐 Usuario no autenticado, mostrando login');
+  console.log('[INDEX] 🔐 Usuario no autenticado, mostrando login');
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -66,15 +76,6 @@ function AppContent() {
   );
 }
 
-// Componente raíz con AuthProvider
-export default function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -85,16 +86,5 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-  },
-  loadingText: {
-    fontSize: 18,
-    color: '#374151',
-    fontWeight: '500',
   },
 });

@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   Pressable, 
   Platform,
-  Dimensions
+  Dimensions,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import FruitPreloader from '@/components/ui/FruitPreloader';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,8 +36,15 @@ export default function MapLayer({
   onGoToDashboard
 }: MapLayerProps) {
   const [mapLoading, setMapLoading] = useState(true);
-  const [showPreloader, setShowPreloader] = useState(true);
   const [mapError, setMapError] = useState<string | null>(null);
+
+  // Auto-ocultar el loading después de 2 segundos máximo
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setMapLoading(false);
+    }, 2000);
+    return () => clearTimeout(timeout);
+  }, []);
 
   // Validar coordenadas
   const isValidCoordinate = (lat: number, lng: number): boolean => {
@@ -94,22 +101,6 @@ export default function MapLayer({
     const coordinates = formatCoordinates(latitude, longitude);
     const description = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}\nPrecisión: ${getLocationAccuracy()}`;
 
-    // Mostrar preloader mientras el mapa carga
-    if (showPreloader) {
-      return (
-        <FruitPreloader 
-          message="Cargando mapa..."
-          showProgress={false}
-          minDuration={3000}
-          onComplete={() => {
-            console.log('✨ Preloader completado, mostrando mapa');
-            setShowPreloader(false);
-            setMapLoading(false);
-          }}
-        />
-      );
-    }
-
     // Si hubo un error al cargar el mapa, mostrar fallback
     if (mapError) {
       return renderFallbackMap();
@@ -120,24 +111,35 @@ export default function MapLayer({
       const NativeMapView = require('@/components/map/NativeMapView').default;
       
       return (
-        <NativeMapView
-          latitude={latitude}
-          longitude={longitude}
-          loading={false}
-          title={marketName || "Tu ubicación actual"}
-          description={description}
-          loginTime={loginTime}
-          onMapReady={() => {
-            console.log('✅ Mapa cargado correctamente');
-            setMapLoading(false);
-          }}
-          onRegionChange={(region: any) => {
-            console.log('🗺️ Región del mapa cambió:', region);
-          }}
-          onUserLocationChange={(event: any) => {
-            console.log('📍 Ubicación del usuario cambió');
-          }}
-        />
+        <View style={{ flex: 1, position: 'relative' }}>
+          <NativeMapView
+            latitude={latitude}
+            longitude={longitude}
+            loading={false}
+            title={marketName || "Tu ubicación actual"}
+            description={description}
+            loginTime={loginTime}
+            onMapReady={() => {
+              console.log('✅ Mapa cargado correctamente');
+              setMapLoading(false);
+            }}
+            onRegionChange={(region: any) => {
+              console.log('🗺️ Región del mapa cambió:', region);
+            }}
+            onUserLocationChange={(event: any) => {
+              console.log('📍 Ubicación del usuario cambió');
+            }}
+          />
+          {/* Overlay de carga sutil */}
+          {mapLoading && (
+            <View style={styles.loadingOverlay}>
+              <View style={styles.loadingBox}>
+                <ActivityIndicator size="large" color="#10b981" />
+                <Text style={styles.loadingText}>Cargando mapa...</Text>
+              </View>
+            </View>
+          )}
+        </View>
       );
     } catch (error) {
       console.error('❌ Error al renderizar el mapa:', error);
@@ -254,5 +256,34 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Estilos para overlay de carga
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(248, 250, 252, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingBox: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  loadingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginTop: 12,
   },
 });

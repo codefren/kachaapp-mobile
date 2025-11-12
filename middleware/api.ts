@@ -1,4 +1,5 @@
 import { ApiResponse } from '@/types/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Configuración base de la API
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://kachaapp.kachadigitalbcn.com';
@@ -16,25 +17,51 @@ interface RequestConfig {
   requiresAuth?: boolean;
 }
 
-// Storage para el token
+// Storage para el token con AsyncStorage
 class TokenStorage {
   private static token: string | null = null;
+  private static initialized: boolean = false;
 
-  static setToken(token: string | null) {
+  // Inicializar token desde AsyncStorage al arrancar
+  static async init(): Promise<void> {
+    if (this.initialized) return;
+    
+    try {
+      this.token = await AsyncStorage.getItem('auth_token');
+      this.initialized = true;
+      console.log('[TOKEN_STORAGE] Inicializado desde AsyncStorage');
+    } catch (error) {
+      console.error('[TOKEN_STORAGE] Error al inicializar:', error);
+    }
+  }
+
+  static async setToken(token: string | null): Promise<void> {
     this.token = token;
-    // En una app real, guardarías en AsyncStorage
-    // await AsyncStorage.setItem('auth_token', token);
+    try {
+      if (token) {
+        await AsyncStorage.setItem('auth_token', token);
+        console.log('[TOKEN_STORAGE] Token guardado en AsyncStorage');
+      } else {
+        await AsyncStorage.removeItem('auth_token');
+        console.log('[TOKEN_STORAGE] Token eliminado de AsyncStorage');
+      }
+    } catch (error) {
+      console.error('[TOKEN_STORAGE] Error al guardar token:', error);
+    }
   }
 
   static getToken(): string | null {
     return this.token;
-    // En una app real, leerías de AsyncStorage
-    // return await AsyncStorage.getItem('auth_token');
   }
 
-  static clearToken() {
+  static async clearToken(): Promise<void> {
     this.token = null;
-    // await AsyncStorage.removeItem('auth_token');
+    try {
+      await AsyncStorage.removeItem('auth_token');
+      console.log('[TOKEN_STORAGE] Token limpiado');
+    } catch (error) {
+      console.error('[TOKEN_STORAGE] Error al limpiar token:', error);
+    }
   }
 }
 
@@ -108,7 +135,8 @@ class ApiMiddleware {
           switch (response.status) {
             case 401:
               errorMessage = 'No autorizado. Por favor inicia sesión nuevamente.';
-              TokenStorage.clearToken();
+              // NO limpiar token aquí - dejamos que AuthContext lo maneje
+              // TokenStorage.clearToken(); ❌ REMOVIDO
               break;
             case 403:
               errorMessage = 'Acceso denegado.';
@@ -225,16 +253,21 @@ class ApiMiddleware {
   }
 
   // Métodos para manejo de tokens
-  setAuthToken(token: string) {
-    TokenStorage.setToken(token);
+  async setAuthToken(token: string): Promise<void> {
+    await TokenStorage.setToken(token);
   }
 
-  clearAuthToken() {
-    TokenStorage.clearToken();
+  async clearAuthToken(): Promise<void> {
+    await TokenStorage.clearToken();
   }
 
   getAuthToken(): string | null {
     return TokenStorage.getToken();
+  }
+
+  // Inicializar TokenStorage
+  async initializeStorage(): Promise<void> {
+    await TokenStorage.init();
   }
 
   getBaseUrl(): string {

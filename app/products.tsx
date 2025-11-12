@@ -95,6 +95,9 @@ export default function ProductsScreen() {
   // Flag para controlar carga única de orden existente
   const hasLoadedOrderRef = useRef<boolean>(false);
   
+  // Flag para prevenir múltiples ejecuciones de preloadAllProducts
+  const isPreloadingRef = useRef<boolean>(false);
+  
   // Usar refs para evitar dependencias en useCallback
   const nextUrlRef = useRef<string | null>(null);
   const dataRef = useRef<Product[] | null>(null);
@@ -411,7 +414,10 @@ export default function ProductsScreen() {
 
   // Función para pre-cargar TODOS los productos progresivamente
   const preloadAllProducts = useCallback(async () => {
-    if (!token || isPreloading) return;
+    // Usar ref para prevenir ejecuciones múltiples (en lugar de estado)
+    if (!token || isPreloadingRef.current) return;
+    
+    isPreloadingRef.current = true;
     
     console.log('\n📦 === INICIANDO PRE-CARGA DE TODOS LOS PRODUCTOS ===');
     setIsPreloading(true);
@@ -498,9 +504,10 @@ export default function ProductsScreen() {
     } finally {
       setIsPreloading(false);
       setPreloadProgress(100);
+      isPreloadingRef.current = false; // Liberar ref
       console.log('✅ === PRE-CARGA FINALIZADA ===\n');
     }
-  }, [token, providerId, isPreloading]);
+  }, [token, providerId]); // Remover isPreloading de dependencias
 
   // Función para obtener la siguiente letra disponible
   const getNextLetter = useCallback(() => {
@@ -765,20 +772,20 @@ export default function ProductsScreen() {
         dataLength: data?.length || 0,
         allProductsLength: allProducts?.length || 0,
         isPreloading,
+        isPreloadingRef: isPreloadingRef.current,
         preloadProgress
       });
       
-      // Solo cargar si NO hay datos cargados (verificar allProducts, no data)
-      // data puede ser 0 cuando la búsqueda no tiene resultados
-      if ((!allProducts || allProducts.length === 0) && !isPreloading) {
+      // Solo cargar si NO hay datos cargados Y no está cargando (usar ref)
+      if ((!allProducts || allProducts.length === 0) && !isPreloadingRef.current) {
         console.log('✅ No hay datos cargados, iniciando pre-carga completa...');
         preloadAllProducts();
-      } else if (isPreloading) {
+      } else if (isPreloading || isPreloadingRef.current) {
         console.log('📊 Pre-carga en progreso:', preloadProgress + '%');
       } else {
         console.log('✅ Datos ya cargados:', allProducts?.length, 'productos (mostrando', data?.length, ')');
       }
-    }, [allProducts, data, isPreloading, preloadProgress, preloadAllProducts])
+    }, [allProducts, data, isPreloading, preloadProgress]) // Remover preloadAllProducts de dependencias
   );
   
   // Efecto para iniciar con la primera letra cuando se cargan las letras disponibles

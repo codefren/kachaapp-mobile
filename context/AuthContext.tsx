@@ -1,7 +1,11 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthResponseWithLocation, Coordinates } from '@/types/location';
 import { authService } from '@/services/authService';
 import { locationService } from '@/services/locationService';
+import { apiMiddleware } from '@/middleware/api';
+import { clearSavedRoute } from '@/hooks/useNavigationPersistence';
 
 // Tipos para el usuario con geolocalización
 interface UserWithLocation {
@@ -22,14 +26,7 @@ interface AuthStateWithLocation {
   loginTime: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  showLocationModal: boolean;
-  pendingLoginData: {
-    user: UserWithLocation;
-    accessToken: string;
-    refreshToken: string;
-    marketName: string;
-    loginTime: string;
-  } | null;
+  isInitialized: boolean; // Indica si la app ya terminó de inicializarse
   refreshInterval: number;
   isRefreshActive: boolean;
   lastLocation: Coordinates | null;
@@ -38,15 +35,7 @@ interface AuthStateWithLocation {
 // Tipos para las acciones del reducer
 type AuthAction =
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SHOW_LOCATION_MODAL'; payload: { 
-      user: UserWithLocation; 
-      accessToken: string; 
-      refreshToken: string;
-      marketName: string;
-      loginTime: string;
-    } }
-  | { type: 'CONFIRM_LOCATION' }
-  | { type: 'CANCEL_LOCATION_MODAL' }
+  | { type: 'SET_INITIALIZED'; payload: boolean }
   | { type: 'LOGIN_SUCCESS'; payload: { 
       user: UserWithLocation; 
       accessToken: string; 
@@ -69,8 +58,7 @@ const initialState: AuthStateWithLocation = {
   loginTime: null,
   isLoading: false,
   isAuthenticated: false,
-  showLocationModal: false,
-  pendingLoginData: null,
+  isInitialized: false, // Empieza false hasta que termine la inicialización
   refreshInterval: 180000, // 3 minutos
   isRefreshActive: false,
   lastLocation: null,
@@ -85,41 +73,10 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
         isLoading: action.payload,
       };
     
-    case 'SHOW_LOCATION_MODAL':
-      console.log('[AUTH] SHOW_LOCATION_MODAL ejecutado');
+    case 'SET_INITIALIZED':
       return {
         ...state,
-        showLocationModal: true,
-        pendingLoginData: action.payload,
-        isLoading: false,
-      };
-    
-    case 'CONFIRM_LOCATION':
-      console.log('[AUTH] CONFIRM_LOCATION ejecutado');
-      if (!state.pendingLoginData) {
-        return state;
-      }
-      return {
-        ...state,
-        user: state.pendingLoginData.user,
-        accessToken: state.pendingLoginData.accessToken,
-        refreshToken: state.pendingLoginData.refreshToken,
-        marketName: state.pendingLoginData.marketName,
-        loginTime: state.pendingLoginData.loginTime,
-        isAuthenticated: true,
-        isRefreshActive: true,
-        showLocationModal: false,
-        pendingLoginData: null,
-        isLoading: false,
-      };
-    
-    case 'CANCEL_LOCATION_MODAL':
-      console.log('[AUTH] CANCEL_LOCATION_MODAL ejecutado');
-      return {
-        ...state,
-        showLocationModal: false,
-        pendingLoginData: null,
-        isLoading: false,
+        isInitialized: action.payload,
       };
     
     case 'LOGIN_SUCCESS':
@@ -161,6 +118,8 @@ function authReducer(state: AuthStateWithLocation, action: AuthAction): AuthStat
         isAuthenticated: false,
         isRefreshActive: false,
         lastLocation: null,
+        // IMPORTANTE: Mantener isInitialized en true para no mostrar preloader de nuevo
+        isInitialized: true,
       };
     
     case 'TOKEN_REFRESHED':
@@ -220,16 +179,129 @@ interface AuthProviderProps {
 // Provider del contexto
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, dispatch] = useReducer(authReducer, initialState);
+  const appStateRef = useRef(AppState.currentState);
 
   console.log('[AUTH] Estado actual:', {
     isAuthenticated: state.isAuthenticated,
+    isInitialized: state.isInitialized,
     hasToken: !!state.accessToken,
     tokenLength: state.accessToken?.length || 0,
     user: state.user?.username,
     marketName: state.marketName
   });
 
-  // No verificar token al inicializar para acelerar el login
+  // Log para detectar si el provider se remonta
+  useEffect(() => {
+    console.log('[AUTH] 🔶 AuthProvider montado');
+    return () => {
+      console.log('[AUTH] 🔴 AuthProvider desmontado');
+    };
+  }, []);
+
+  // Inicializar AsyncStorage y restaurar sesión al iniciar la app
+  useEffect(() => {
+    const initializeAuth = async () => {
+      console.log('[AUTH] Inicializando autenticación...');
+      
+      try {
+        // Verificar si ya se inicializó previamente (para evitar preloader en reinicios)
+        const wasInitialized = await AsyncStorage.getItem('app_initialized');
+        if (wasInitialized === 'true') {
+          console.log('[AUTH] ✨ App ya fue inicializada previamente, saltando preloader');
+          dispatch({ type: 'SET_INITIALIZED', payload: true });
+        }
+        
+        // Inicializar TokenStorage
+        await apiMiddleware.initializeStorage();
+        console.log('[AUTH] TokenStorage inicializado');
+        
+        // Intentar restaurar sesión existente
+        const authToken = await AsyncStorage.getItem('auth_token');
+        const refreshToken = await AsyncStorage.getItem('refresh_token');
+        const userDataStr = await AsyncStorage.getItem('user_data');
+        
+        if (authToken && refreshToken && userDataStr) {
+          console.log('[AUTH] Tokens encontrados, restaurando sesión...');
+          
+          try {
+            const userData = JSON.parse(userDataStr);
+            
+            // Restaurar sesión directamente desde AsyncStorage
+            // NO hacer refresh aquí - dejamos que el sistema automático lo maneje
+            console.log('[AUTH] ✅ Sesión restaurada desde AsyncStorage');
+            
+            dispatch({
+              type: 'LOGIN_SUCCESS',
+              payload: {
+                user: {
+                  id: userData.username || 'unknown',
+                  username: userData.username || 'unknown',
+                  market_name: userData.market_name,
+                  login_time: userData.login_time,
+                },
+                accessToken: authToken,
+                refreshToken: refreshToken,
+                marketName: userData.market_name || '',
+                loginTime: userData.login_time || '',
+              },
+            });
+            
+            // Iniciar tracking de ubicación
+            setTimeout(() => {
+              startLocationTracking();
+            }, 100);
+            
+            // Hacer refresh en segundo plano (sin bloquear la restauración)
+            // Si falla, el sistema de refresh automático lo manejará
+            setTimeout(async () => {
+              console.log('[AUTH] Validando sesión en segundo plano...');
+              const result = await authService.refreshToken(refreshToken, true);
+              
+              if (result.success && result.access) {
+                console.log('[AUTH] ✅ Sesión validada correctamente');
+                // Actualizar con los nuevos tokens
+                dispatch({
+                  type: 'TOKEN_REFRESHED',
+                  payload: {
+                    accessToken: result.access,
+                    refreshToken: result.refresh || refreshToken,
+                  },
+                });
+              } else {
+                // Solo limpiar si es error 401 (token definitivamente inválido)
+                const statusCode = (result as any).statusCode;
+                if (statusCode === 401) {
+                  console.error('[AUTH] ❌ Token inválido (401), cerrando sesión');
+                  dispatch({ type: 'LOGOUT' });
+                  await AsyncStorage.multiRemove(['auth_token', 'refresh_token', 'user_data', 'last_location']);
+                } else {
+                  console.warn('[AUTH] ⚠️ Error temporal al validar (código:', statusCode, '), manteniendo sesión');
+                  // No hacer nada, el refresh automático seguirá intentando
+                }
+              }
+            }, 1000); // Esperar 1 segundo antes de validar
+            
+          } catch (error) {
+            console.error('[AUTH] Error parseando datos de usuario:', error);
+            // Solo limpiar si hay corrupción de datos
+            await AsyncStorage.multiRemove(['auth_token', 'refresh_token', 'user_data', 'last_location']);
+          }
+        } else {
+          console.log('[AUTH] No hay sesión guardada');
+        }
+      } catch (error) {
+        console.error('[AUTH] Error inicializando autenticación:', error);
+      } finally {
+        // Marcar como inicializado SIEMPRE, haya o no sesión
+        dispatch({ type: 'SET_INITIALIZED', payload: true });
+        // Guardar en AsyncStorage para que persista en reinicios
+        await AsyncStorage.setItem('app_initialized', 'true');
+        console.log('[AUTH] ✅ Inicialización completada y guardada');
+      }
+    };
+    
+    initializeAuth();
+  }, []); // Solo al montar
 
   // Configurar callback para refresh de token y logout automático
   useEffect(() => {
@@ -257,6 +329,69 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
     });
   }, [state.refreshToken]);
+
+  // AppState listener - Refrescar token cuando vuelve del background
+  useEffect(() => {
+    
+    const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
+      const previousAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+      
+      // Solo actuar cuando la app pasa de background/inactive a active
+      if (previousAppState.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('[AUTH] 🔄 App volvió a foreground desde', previousAppState);
+        
+        // Verificar si hay sesión activa
+        const authToken = await AsyncStorage.getItem('auth_token');
+        const refreshToken = await AsyncStorage.getItem('refresh_token');
+        
+        if (!authToken || !refreshToken) {
+          console.log('[AUTH] ⚠️ No hay tokens guardados, sesión no activa');
+          return;
+        }
+        
+        console.log('[AUTH] Verificando validez de la sesión...');
+        
+        try {
+          // Hacer refresh inmediato con timeout extendido (desde background)
+          const result = await authService.refreshToken(refreshToken, true);
+          
+          if (result.success && result.access) {
+            console.log('[AUTH] ✅ Token refrescado exitosamente al volver');
+            
+            // Actualizar token en contexto
+            dispatch({
+              type: 'TOKEN_REFRESHED',
+              payload: {
+                accessToken: result.access,
+                refreshToken: result.refresh || refreshToken,
+              },
+            });
+          } else {
+            // Solo cerrar sesión si el error es definitivamente de autenticación
+            const statusCode = (result as any).statusCode;
+            
+            if (statusCode === 401) {
+              console.error('[AUTH] ❌ Token expirado, cerrando sesión');
+              dispatch({ type: 'LOGOUT' });
+              await AsyncStorage.multiRemove(['auth_token', 'refresh_token', 'user_data', 'last_location']);
+            } else if (statusCode === 403) {
+              console.warn('[AUTH] ⚠️ Usuario fuera de rango, manteniendo sesión pero mostrando advertencia');
+              // NO cerrar sesión, solo advertir al usuario
+            } else {
+              console.warn('[AUTH] ⚠️ Error temporal al volver (código:', statusCode, '), manteniendo sesión');
+            }
+          }
+        } catch (error) {
+          console.error('[AUTH] Error verificando token al volver:', error);
+          // No cerrar sesión en caso de error de red
+          console.log('[AUTH] Manteniendo sesión a pesar del error');
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, []); // Sin dependencias para evitar recreaciones
 
   // Función para login con geolocalización
   const login = async (username: string, password: string): Promise<{ success: boolean; message?: string; error?: any }> => {
@@ -327,6 +462,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       await authService.logout();
       stopLocationTracking();
+      // Limpiar flag de confirmación de dashboard
+      await AsyncStorage.removeItem('dashboard_confirmed');
+      console.log('[AUTH] Flag de dashboard limpiado');
+      // Limpiar ruta de navegación guardada
+      await clearSavedRoute();
     } catch (error) {
       console.warn('[AUTH] Error durante logout:', error);
     } finally {
